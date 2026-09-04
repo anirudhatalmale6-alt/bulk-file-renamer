@@ -47,6 +47,14 @@ Press one of the starting points:
                               names like "Episode 3.05" are dropped.
 
 
+  Music album:             for an album folder. Takes the artist from the
+  Artist (from folder)     folder name and puts it in front of every track:
+                           a folder called "Creedence Clearwater Revival -
+                           Chronicle The 20 Greatest Hits (2023) Mp3 320kbps
+                           [PMEDIA]" containing "01. Susie Q. (Single
+                           Edit).mp3" gives "Creedence Clearwater Revival -
+                           Susie Q.mp3". Track numbers and bracketed notes go.
+
   Music: Artist - Song     turns "01 - Radiohead - Karma Police.mp3" and
                            "Radiohead_-_Karma_Police.mp3" into
                            "Radiohead - Karma Police.mp3"
@@ -66,6 +74,12 @@ Press one of the starting points:
 Then add more rules on top if you need them. Rules run top to bottom, each
 one working on the result of the last, and you can reorder them with the
 arrows. That is the point of the whole thing: one pass instead of several.
+
+The TV preset also removes the word "The" anywhere in a name, so
+"The Americans S01E01" becomes "Americans S1E01". Season numbers are not
+padded - S1, S2, and S10 only when a show really has ten or more seasons.
+If you ever want "The" kept, delete the "Remove the word The" rule from the
+list after clicking the preset.
 
 STEP 3 - check the preview.
 Every file is listed with its current name and the name it would get. Green

@@ -161,7 +161,9 @@ def plan_folder(path, rules, recursive=False, extensions=None):
         except OSError:
             existing = names
 
-        for row in engine.plan(names, rules, existing=existing):
+        context = {"folder": os.path.basename(directory.rstrip(os.sep)) or directory}
+
+        for row in engine.plan(names, rules, existing=existing, context=context):
             row = dict(row)
             row["dir"] = directory
             row["old_path"] = os.path.join(directory, row["old"])

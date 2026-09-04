@@ -75,7 +75,7 @@ def inject_tables(rules, shows, artists, protect=None):
         elif rule.get("type") == "preset_artist_song":
             rule["artists"] = artists
 
-        if rule.get("type") in ("preset_tv", "preset_artist_song", "strip_junk"):
+        if rule.get("type") in ("preset_tv", "preset_artist_song", "strip_junk", "folder_artist"):
             rule["protect"] = protect
 
         out.append(rule)
@@ -87,7 +87,12 @@ PRESETS = [
     {
         "id": "tv_client",
         "label": "TV:  Showname S3E05 Title (your format)",
-        "rules": [{"type": "preset_tv"}],
+        "rules": [{"type": "preset_tv"}, {"type": "drop_the"}],
+    },
+    {
+        "id": "album",
+        "label": "Music album:  Artist (from folder) - Song",
+        "rules": [{"type": "folder_artist"}],
     },
     {
         "id": "artist_song",
@@ -323,7 +328,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer v1.2 is running.",
+        "  Bulk Renamer v1.3 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,

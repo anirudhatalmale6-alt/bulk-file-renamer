@@ -91,6 +91,11 @@ _BARE_EPISODE = re.compile(r"\b(?P<season>[1-9])(?P<episode>\d{2})\b")
 
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
+# The word "The" wherever it appears. The client files "The Americans" under
+# "Americans", so it goes - but only as a whole word, never inside one
+# ("Theatre", "Theory" and "Them" must survive).
+_THE = re.compile(r"(?<![a-z0-9])the(?![a-z0-9])", re.I)
+
 # A leading track number: "01 ", "01. ", "01 - ", "(01)"
 _LEADING_TRACK = re.compile(r"^\s*[\(\[]?\s*(\d{1,3})\s*[\)\]]?\s*[-._)\]]*\s+")
 
@@ -161,6 +166,11 @@ def _normalise_separators(text):
         text = text.replace(dash, "-")
 
     return _collapse(text)
+
+
+def drop_the(text):
+    """Remove the word "The" anywhere in a name."""
+    return _collapse(_THE.sub(" ", text))
 
 
 def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True, protect=None):
@@ -362,6 +372,31 @@ def smart_title(text):
             out.append(lowered[:1].upper() + lowered[1:])
 
     return " ".join(out)
+
+
+def artist_from_folder(folder, fixes=None):
+    """Work the artist out of an album folder name.
+
+    "Creedence Clearwater Revival - Chronicle The 20 Greatest Hits (Remastered)
+    (2023) Mp3 320kbps [PMEDIA]" -> "Creedence Clearwater Revival".
+
+    A track file rarely names its own artist; the folder above it nearly always
+    does, and that is the only place the information exists.
+    """
+    if not folder:
+        return ""
+
+    cleaned = strip_junk(folder, drop_year=True)
+
+    # Everything before the first " - " is the artist; album details follow it.
+    parts = re.split(r"\s-\s", cleaned, maxsplit=1)
+    artist = parts[0].strip() if parts else cleaned
+
+    # Strip anything that is not a letter, digit, space or the usual name
+    # punctuation - stray stars and symbols from scene folders.
+    artist = re.sub(r"[^\w\s'&.,!-]", " ", artist, flags=re.UNICODE)
+
+    return title_words(_collapse(artist), fixes)
 
 
 # ---------------------------------------------------------------------------
@@ -598,8 +633,13 @@ def _rule_trim(stem, rule):
     return stem[count:]
 
 
-def apply_rules(stem, ext, rules, index=0):
-    """Run every rule in order. Returns (stem, ext)."""
+def apply_rules(stem, ext, rules, index=0, context=None):
+    """Run every rule in order. Returns (stem, ext).
+
+    context carries facts about where the file lives - currently just the
+    containing folder name, which is where an album's artist is written.
+    """
+    context = context or {}
     for rule in rules or []:
         kind = rule.get("type")
 
@@ -625,6 +665,21 @@ def apply_rules(stem, ext, rules, index=0):
             stem = _rule_number(stem, rule, index)
         elif kind == "trim":
             stem = _rule_trim(stem, rule)
+        elif kind == "drop_the":
+            stem = drop_the(stem)
+        elif kind == "folder_artist":
+            artist = rule.get("artist") or artist_from_folder(
+                context.get("folder", ""), rule.get("fixes"))
+
+            if artist:
+                cleaned = _LEADING_TRACK.sub("", strip_junk(stem, protect=rule.get("protect")))
+                cleaned = title_words(_collapse(cleaned), rule.get("fixes"))
+
+                # Do not repeat the artist if the track already starts with it.
+                if cleaned.lower().startswith(artist.lower()):
+                    stem = cleaned
+                else:
+                    stem = "{} - {}".format(artist, cleaned) if cleaned else artist
         elif kind == "ext_lower":
             ext = ext.lower()
         elif kind == "set_ext":
@@ -669,7 +724,7 @@ def name_problem(stem, ext):
     return None
 
 
-def plan(filenames, rules, existing=None):
+def plan(filenames, rules, existing=None, context=None):
     """Work out what every file would be renamed to.
 
     Args:
@@ -693,7 +748,7 @@ def plan(filenames, rules, existing=None):
         stem, ext = split_name(filename)
 
         try:
-            new_stem, new_ext = apply_rules(stem, ext, rules, index)
+            new_stem, new_ext = apply_rules(stem, ext, rules, index, context)
         except Exception as exc:  # a bad rule must never kill the whole preview
             rows.append({"old": filename, "new": filename, "status": "error",
                          "reason": "rule failed: {}".format(exc)})

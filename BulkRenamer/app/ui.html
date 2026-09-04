@@ -36,6 +36,10 @@
     border-radius: 5px; padding: 7px 9px; font: 13px/1.5 Consolas, "Courier New", monospace;
     resize: vertical;
   }
+  summary { cursor: pointer; padding: 2px 0; }
+  summary::marker { color: var(--dim); }
+  details > summary h2 { margin: 0; }
+  details[open] > summary { margin-bottom: 8px; }
   code { background: var(--soft); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--line); }
   input[type=text], input[type=number], select {
     background: var(--field); color: var(--text); border: 1px solid var(--line);
@@ -107,7 +111,7 @@
 <body>
 
 <header>
-  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.2</span></h1>
+  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.3</span></h1>
   <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
 </header>
 
@@ -127,7 +131,8 @@
   </section>
 
   <section>
-    <h2>Names the filename cannot tell me</h2>
+   <details id="advanced">
+    <summary><h2 style="display:inline">Names the filename cannot tell me — open only if something comes out wrong</h2></summary>
     <p class="muted" style="margin-top:-4px">
       An episode title that is not in the filename, how many episodes a series has, or where an
       artist's name ends and the song begins — none of that is in the text, so it has to come
@@ -154,19 +159,24 @@
       <span class="muted">Off by default. When off, nothing leaves your PC. Results are cached, so a second run needs no connection.</span>
     </div>
     <div id="lookupReport" class="muted" style="margin-top:8px"></div>
+   </details>
   </section>
 
   <section>
-    <h2>2 &nbsp;Rules — they run top to bottom, so one pass can do the lot</h2>
+    <h2>2 &nbsp;What should the names look like?</h2>
     <div class="row" style="margin-bottom:12px">
-      <span class="muted">Start from:</span>
+      <span class="muted">Click one:</span>
       <span id="presets"></span>
     </div>
     <div id="rules"></div>
+   <details id="morerules">
+    <summary class="muted">Add your own rules, or load a saved set</summary>
     <div class="row" style="margin-top:10px">
       <select id="addType">
         <option value="preset_tv">TV: Showname S3E05 Title (your format)</option>
         <option value="preset_artist_song">Music: Artist - Song</option>
+        <option value="folder_artist">Music album: Artist (from folder) - Song</option>
+        <option value="drop_the">Remove the word "The"</option>
         <option value="preset_show_episode">TV: Showname S01E01 (plain)</option>
         <option value="strip_junk">Strip download junk</option>
         <option value="find_replace">Find and replace</option>
@@ -185,6 +195,7 @@
       <button id="rulesetSave">Save current…</button>
       <button id="rulesetDelete" class="danger">Delete</button>
     </div>
+   </details>
   </section>
 
   <section>
@@ -276,6 +287,10 @@ function note(kind, text) {
 const FIELDS = {
   preset_tv: [],
   preset_artist_song: [],
+  folder_artist: [
+    { key: "artist", type: "text", label: "artist (blank = take it from the folder name)", width: 240 }
+  ],
+  drop_the: [],
   case_every_word: [],
   preset_show_episode: [
     { key: "style", type: "select", label: "format",
@@ -318,7 +333,9 @@ const FIELDS = {
 const LABELS = {
   preset_tv: "TV: Showname S3E05 Title (your format)",
   case_every_word: "Capitalise Every Word",
-  preset_artist_song: "Music: Artist - Song", preset_show_episode: "TV: Showname S01E01 (plain)",
+  preset_artist_song: "Music: Artist - Song",
+  folder_artist: "Music album: Artist (from folder) - Song",
+  drop_the: 'Remove the word "The"', preset_show_episode: "TV: Showname S01E01 (plain)",
   strip_junk: "Strip download junk", find_replace: "Find and replace",
   case: "Change capitalisation", insert: "Add prefix / suffix", number: "Add numbering",
   trim: "Remove characters", ext_lower: "Lowercase the extension", set_ext: "Change the extension"
