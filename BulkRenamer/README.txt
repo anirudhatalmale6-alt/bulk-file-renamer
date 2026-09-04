@@ -38,17 +38,24 @@ to certain files - type mkv, mp4, mp3 and it will leave everything else alone.
 
 STEP 2 - the naming style.
 The first button is "Automatic - match the folder", and it is on to start
-with. The program looks at what is actually in the folder and picks the style
-that fits: episode numbers in the filenames means the TV format, music files
-mean the music format, and so on. It writes underneath which one it chose and
-why, so you can see it was not a guess in the dark.
+with. Every file is looked at on its own and given the style that suits it: a
+filename with an episode number in it gets the TV format, a film gets the film
+format, an MP3 gets the music format. A download folder holding six films and
+two episodes is handled correctly in one pass - the films come out as films
+and the episodes as episodes.
 
-If it picks wrongly, click any other button and that choice sticks until you
-hand it back by clicking "Automatic" again.
+It writes underneath how the folder was split ("4 files Film: Title (Year);
+2 files your TV format"), and when the files are not all getting the same
+treatment a Style column appears in the preview saying which one each got.
+Nothing is guessed behind your back.
+
+If you would rather one style applied to everything, click any other button.
+That choice sticks until you hand it back by clicking "Automatic" again.
 
 This matters more than it sounds. The commonest way to get a name you did not
-want is a style left selected from the last folder - the program does exactly
-as it is told and produces something odd. Automatic removes that trap.
+want is one style applied to files that needed different ones - the program
+does exactly as it is told and produces something odd. Automatic removes that
+trap.
 
 The styles are:
 
@@ -99,10 +106,12 @@ The styles are:
                            "Radiohead - Karma Police.mp3". Use this when the
                            files have no tags.
 
-  TV: Showname S01E01      turns "The.Bear.S03E07.1080p.WEB-DL.x265.mkv"
-                           into "The Bear S03E07.mkv". It understands
-                           S03E07, 3x07, "Season 3 Episode 7" and bare
-                           codes like 307.
+  TV: Showname S1E01       turns "The.Bear.S03E07.1080p.WEB-DL.x265.mkv"
+                           into "The Bear S3E07.mkv". It understands
+                           S03E07, 3x07, "Season 3 Episode 7", bare codes
+                           like 307, and an episode number with no season
+                           like E01. The season is not padded; if you want
+                           S03E07, open the step and choose that format.
 
   Film: Title (Year)       turns "Dune.Part.Two.2024.2160p.WEB-DL.mkv"
                            into "Dune Part Two (2024).mkv"
@@ -126,6 +135,16 @@ The TV preset also removes the word "The" anywhere in a name, so
 padded - S1, S2, and S10 only when a show really has ten or more seasons.
 If you ever want "The" kept, delete the "Remove the word The" rule from the
 list after clicking the preset.
+
+THE YEAR
+--------
+
+A year sitting in front of an episode number is the year the series started,
+printed there by whoever released the file, and it is removed:
+"Bodies.2023.S01E08.mkv" becomes "Bodies S1E08.mkv". A year anywhere else is
+left alone, because that is how films are named - and a number that is part of
+the title survives, so "Blade Runner 2049" keeps its 2049.
+
 
 QUOTE MARKS
 -----------

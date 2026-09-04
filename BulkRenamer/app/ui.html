@@ -127,7 +127,7 @@
 <body>
 
 <header>
-  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.6</span></h1>
+  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.7</span></h1>
   <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
 </header>
 
@@ -211,7 +211,7 @@
     <div id="commonNote" class="muted" style="margin-bottom:8px"></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th class="pick"><input type="checkbox" id="pickAll" title="select all / none" /></th><th id="thFolder" style="display:none">Folder</th><th>Now</th><th>After</th><th>Status</th></tr></thead>
+        <thead><tr><th class="pick"><input type="checkbox" id="pickAll" title="select all / none" /></th><th id="thFolder" style="display:none">Folder</th><th id="thStyle" style="display:none">Style</th><th>Now</th><th>After</th><th>Status</th></tr></thead>
         <tbody id="rows"><tr><td colspan="5" class="muted">Choose a folder to begin.</td></tr></tbody>
       </table>
     </div>
@@ -289,7 +289,8 @@ const FIELDS = {
   case_every_word: [],
   preset_show_episode: [
     { key: "style", type: "select", label: "format",
-      options: [["S{season:02d}E{episode:02d}", "S01E01"], ["{season}x{episode:02d}", "1x01"],
+      options: [["S{season}E{episode:02d}", "S1E01"], ["S{season:02d}E{episode:02d}", "S01E01"],
+                ["{season}x{episode:02d}", "1x01"],
                 ["Season {season} Episode {episode:02d}", "Season 1 Episode 01"]] }
   ],
   strip_junk: [
@@ -326,12 +327,13 @@ const FIELDS = {
 };
 
 const LABELS = {
+  auto_file: "Automatic: each file gets the style that suits it",
   preset_tv: "TV: Showname S3E05 Title (your format)",
   case_every_word: "Capitalise Every Word",
   preset_artist_song: "Music: Artist - Song, from the filename",
   tag_music: "Music: Artist - Song, read from the tags",
   folder_artist: "Music album: Artist (from folder) - Song",
-  drop_the: 'Remove the word "The"', preset_show_episode: "TV: Showname S01E01 (plain)",
+  drop_the: 'Remove the word "The"', preset_show_episode: "TV: Showname S1E01 (plain)",
   strip_junk: "Strip download junk", find_replace: "Find and replace",
   case: "Change capitalisation", insert: "Add prefix / suffix", number: "Add numbering",
   trim: "Remove characters", ext_lower: "Lowercase the extension", set_ext: "Change the extension"
@@ -587,14 +589,20 @@ function renderAutoNote(data) {
     return;
   }
 
-  if (!data || !data.auto) {
+  if (!data || !data.auto || !data.auto_reason) {
     host.textContent = "Nothing here to go on yet — choose a folder, or pick a style yourself.";
+    return;
+  }
+
+  if (data.auto === "auto_file") {
+    host.textContent = "Every file gets the style that suits it — " + data.auto_reason +
+      ". If that is not what you want, click a style below and it applies to everything.";
     return;
   }
 
   const preset = PRESETS.filter(p => p.id === data.auto)[0];
   host.textContent = "Chosen for this folder: " + (preset ? preset.label : data.auto) +
-    (data.auto_reason ? "  —  " + data.auto_reason + "." : "") +
+    "  —  " + data.auto_reason + "." +
     "  If that is not what you want, click a different one.";
 }
 
@@ -756,8 +764,16 @@ function renderPreview() {
   // A folder column is only worth its width when the files are actually
   // spread over more than one folder.
   const showFolder = rows.some(r => r.folder);
-  const cols = showFolder ? 5 : 4;
+
+  // Same test for the style column: only worth its width when the files are
+  // NOT all getting the same treatment, which is the mixed download folder.
+  const styles = {};
+  rows.forEach(r => { if (r.style) styles[r.style] = 1; });
+  const showStyle = Object.keys(styles).length > 1;
+
+  const cols = 4 + (showFolder ? 1 : 0) + (showStyle ? 1 : 0);
   $("thFolder").style.display = showFolder ? "" : "none";
+  $("thStyle").style.display = showStyle ? "" : "none";
 
   if (!rows.length) {
     tb.innerHTML = '<tr><td colspan="' + cols + '" class="muted">No files here matching that filter.</td></tr>';
@@ -788,6 +804,12 @@ function renderPreview() {
       const f = document.createElement("td");
       f.className = "muted"; f.textContent = r.folder || "";
       tr.appendChild(f);
+    }
+
+    if (showStyle) {
+      const s = document.createElement("td");
+      s.className = "muted"; s.textContent = r.style || "";
+      tr.appendChild(s);
     }
 
     const a = document.createElement("td"); a.className = "old"; a.textContent = r.old;

@@ -73,14 +73,15 @@ def inject_tables(rules, shows, artists, protect=None, add_titles=False):
     for rule in rules or []:
         rule = dict(rule)
 
-        if rule.get("type") == "preset_tv":
+        if rule.get("type") in ("preset_tv", "auto_file"):
             rule["shows"] = shows
             rule["add_titles"] = add_titles
-        elif rule.get("type") in ("preset_artist_song", "tag_music"):
+
+        if rule.get("type") in ("preset_artist_song", "tag_music", "auto_file"):
             rule["artists"] = artists
 
         if rule.get("type") in ("preset_tv", "preset_artist_song", "tag_music",
-                                "strip_junk", "folder_artist"):
+                                "strip_junk", "folder_artist", "auto_file"):
             rule["protect"] = protect
 
         out.append(rule)
@@ -111,7 +112,7 @@ PRESETS = [
     },
     {
         "id": "show_episode",
-        "label": "TV:  Showname S01E01 (plain)",
+        "label": "TV:  Showname S1E01 (plain)",
         "rules": [{"type": "preset_show_episode"}],
     },
     {
@@ -168,28 +169,32 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def _choose_rules(self, data):
-        """The rules to run: the user's own, or the ones this folder asks for.
+        """The rules to run: the user's own, or one chosen per file.
 
-        Auto mode exists because the client twice reported a naming bug that was
-        really a preset left over from the previous folder. The app now looks at
-        what is actually in the folder and says which style it picked and why,
-        so a wrong guess is visible instead of surprising.
+        Auto mode exists because three of the client's bug reports were really
+        the wrong style being applied. v1.5 chose one style for the whole
+        folder, which is still wrong for a download folder holding films and
+        episodes together - the films outvote the episodes and the episodes come
+        out as films ("Bodies 2023 S01E08"). So the choice is now made per file,
+        and the app reports the mix.
         """
         rules = data.get("rules") or []
 
         if not data.get("auto"):
             return rules, None, ""
 
-        preset_id, reason = fileops.detect_preset(
-            data.get("path", ""), bool(data.get("recursive")),
-            data.get("extensions") or None,
-        )
+        return [{"type": "auto_file"}], "auto_file", ""
 
-        for preset in PRESETS:
-            if preset["id"] == preset_id:
-                return [dict(rule) for rule in preset["rules"]], preset_id, reason
+    @staticmethod
+    def _auto_reason(styles):
+        """"3 files in your TV format, 8 as Film: Title (Year)"."""
+        parts = ["{} {} {}".format(count, "file" if count == 1 else "files", label)
+                 for label, count in sorted(styles.items(), key=lambda kv: -kv[1])]
 
-        return rules, None, ""
+        if not parts:
+            return ""
+
+        return "; ".join(parts)
 
     def _prepare(self, data, rules=None):
         """Resolve alias tables and any lookup, then hand the rules over."""
@@ -198,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
         report = []
 
         rules = data.get("rules") or [] if rules is None else rules
-        needs_shows = any(r.get("type") == "preset_tv" for r in rules)
+        needs_shows = any(r.get("type") in ("preset_tv", "auto_file") for r in rules)
 
         if needs_shows:
             try:
@@ -301,6 +306,9 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("extensions") or None,
                     report=info,
                 )
+                if auto_id == "auto_file":
+                    auto_reason = self._auto_reason(info.get("styles") or {})
+
                 self._send(200, {"rows": rows, "summary": engine.summarise(rows),
                                  "lookup": report, "auto": auto_id,
                                  "auto_reason": auto_reason, "rules": chosen,
@@ -390,7 +398,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer v1.6 is running.",
+        "  Bulk Renamer v1.7 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,

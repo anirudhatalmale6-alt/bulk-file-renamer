@@ -100,6 +100,11 @@ _BARE_EPISODE = re.compile(r"\b(?P<season>[1-9])(?P<episode>\d{2})\b")
 
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
+# A year immediately in front of an episode code, as in "Bodies 2023 S01E08".
+_YEAR_BEFORE_EPISODE = re.compile(
+    r"\b(19|20)\d{2}\b(?=[\s._-]*(?:s\d{1,2}[\s._-]*e\d{1,3}|\d{1,2}x\d{1,3}|"
+    r"season\s*\d{1,2})\b)", re.I)
+
 # The word "The" wherever it appears. The client files "The Americans" under
 # "Americans", so it goes - but only as a whole word, never inside one
 # ("Theatre", "Theory" and "Them" must survive).
@@ -205,6 +210,10 @@ def _normalise_separators(text):
     text = re.sub(r"(?<=[^\d])\.(?=[^\d])", " ", text)
     text = re.sub(r"(?<=\d)\.(?=[^\d\s])", " ", text)
     text = re.sub(r"(?<=[^\d\s])\.(?=\d)", " ", text)
+    # Two multi-digit runs joined by a dot are two separate things, not a
+    # decimal: "Blade.Runner.2049.2017" is a title ending in 2049 and a release
+    # year. "5.1" and "2.0" keep their dot because one side is a single digit.
+    text = re.sub(r"(?<=\d\d)\.(?=\d\d)", " ", text)
     text = text.replace("_", " ")
 
     for dash in _DASHES:
@@ -367,6 +376,12 @@ def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True, prote
 
     if drop_year:
         text = _YEAR.sub(" ", text)
+    else:
+        # A year sitting in front of an episode code is the year the series
+        # started, printed by the release, and never part of the title: the
+        # client's "Bodies 2023 S01E08.mkv". A year anywhere else is left alone,
+        # because that is how films are named.
+        text = _YEAR_BEFORE_EPISODE.sub(" ", text)
 
     # Last, because a tag removed above may have been sitting between two
     # words that are common to the whole batch.
@@ -839,11 +854,26 @@ def preset_tag_music(stem, entry=None, fixes=None, artists=None, protect=None,
     return _collapse(name)
 
 
-def preset_show_episode(stem, style="S{season:02d}E{episode:02d}"):
-    """Best effort at 'Showname S01E01'."""
+# One place, because the rule runner used to carry its own copy of this and the
+# two drifted apart.
+DEFAULT_EPISODE_STYLE = "S{season}E{episode:02d}"
+
+
+def preset_show_episode(stem, style=DEFAULT_EPISODE_STYLE):
+    """Best effort at 'Showname S1E01'.
+
+    The season is not padded by default. That is the client's rule everywhere -
+    "the 0 after S is not supposed to be there" - and it applied here too even
+    though this preset is the plain one. S01E01 is still in the format list.
+    """
     found = find_episode(stem)
 
     if not found:
+        # NOT drop_year here: with no episode code this is just a name, and
+        # "Blade Runner 2049" would lose the 2049 - the year regex cannot tell
+        # a release year from a number that belongs to the title. A year sitting
+        # in front of an episode code is handled inside strip_junk, where the
+        # code itself is the proof that the number is a year.
         return smart_title(strip_junk(stem))
 
     show, season, episode = found
@@ -856,6 +886,81 @@ def preset_show_episode(stem, style="S{season:02d}E{episode:02d}"):
     marker = style.format(season=season, episode=episode)
 
     return "{} {}".format(smart_title(show), marker)
+
+
+# ---------------------------------------------------------------------------
+# Choosing a style per file
+# ---------------------------------------------------------------------------
+
+VIDEO_EXTENSIONS = {"mkv", "mp4", "avi", "m4v", "mov", "wmv", "mpg", "mpeg", "ts",
+                    "webm", "divx", "flv", "m2ts", "rmvb"}
+MUSIC_EXTENSIONS = {"mp3", "flac", "m4a", "wav", "ogg", "opus", "wma", "aiff", "ape",
+                    "alac"}
+
+# What each style is called in the app, and the rules it runs.
+AUTO_STYLES = {
+    "tv": ("your TV format",
+           [{"type": "preset_tv"}, {"type": "drop_the"}]),
+    "music_tags": ("Artist - Song, read from the tags",
+                   [{"type": "tag_music"}]),
+    "music_name": ("Artist - Song, from the filename",
+                   [{"type": "preset_artist_song"}]),
+    "movie": ("Film: Title (Year)",
+              [{"type": "strip_junk"},
+               {"type": "find_replace", "find": r"\s*((19|20)\d{2})\s*$",
+                "replace": r" (\1)", "regex": True},
+               {"type": "case", "mode": "title"}]),
+    "clean": ("junk cleanup",
+              [{"type": "strip_junk"}, {"type": "case", "mode": "title"}]),
+}
+
+
+def auto_style(stem, ext, tag_entry=None):
+    """Which style suits THIS file.
+
+    v1.5 chose one style for the whole folder, which is wrong for a download
+    folder: a handful of episodes among a pile of films made the films win, and
+    the episodes came out as films. The client saw that as
+    "Bodies 2023 S01E08.mkv" - the film style leaves a year and an untouched
+    S01 alone, quite correctly, because it was never told it had an episode.
+    Deciding per file removes the whole class of problem.
+    """
+    kind = (ext or "").lower().lstrip(".")
+
+    if kind in MUSIC_EXTENSIONS:
+        entry = tag_entry or {}
+
+        if entry.get("artist") and entry.get("title"):
+            return "music_tags"
+
+        return "music_name"
+
+    if kind in VIDEO_EXTENSIONS:
+        return "tv" if find_episode_span(stem) else "movie"
+
+    return "clean"
+
+
+# Settings that belong to the batch rather than to one rule, and so have to be
+# handed down to whichever style is chosen for a file.
+_INHERITED = ("shows", "artists", "protect", "fixes", "add_titles", "use_track")
+
+
+def auto_rules(stem, ext, tag_entry=None, parent=None):
+    """The rule list for this one file, carrying the batch's settings."""
+    style = auto_style(stem, ext, tag_entry)
+    out = []
+
+    for rule in AUTO_STYLES[style][1]:
+        rule = dict(rule)
+
+        for key in _INHERITED:
+            if parent and key in parent and key not in rule:
+                rule[key] = parent[key]
+
+        out.append(rule)
+
+    return style, out
 
 
 # ---------------------------------------------------------------------------
@@ -944,7 +1049,12 @@ def apply_rules(stem, ext, rules, index=0, context=None, filename=None):
         # wherever it can help.
         common = context.get("common") if rule.get("drop_common", True) else None
 
-        if kind == "preset_tv":
+        if kind == "auto_file":
+            # Pick the style from this file alone and run it. Recursion is one
+            # level deep by construction - no style contains another auto_file.
+            _style, sub = auto_rules(stem, ext, tags, rule)
+            stem, ext = apply_rules(stem, ext, sub, index, context, filename)
+        elif kind == "preset_tv":
             stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"), rule.get("protect"),
                              bool(rule.get("add_titles")), common,
                              context.get("episode_total"))
@@ -954,7 +1064,10 @@ def apply_rules(stem, ext, rules, index=0, context=None, filename=None):
             stem = preset_tag_music(stem, tags, rule.get("fixes"), rule.get("artists"),
                                     rule.get("protect"), bool(rule.get("use_track")))
         elif kind == "preset_show_episode":
-            stem = preset_show_episode(stem, rule.get("style", "S{season:02d}E{episode:02d}"))
+            # No default spelled out here - preset_show_episode owns it, or the
+            # two would drift apart (they did: the signature said S1E01 and this
+            # line still said S01E01).
+            stem = preset_show_episode(stem, rule.get("style") or DEFAULT_EPISODE_STYLE)
         elif kind == "strip_junk":
             stem = strip_junk(stem, drop_year=bool(rule.get("drop_year")),
                               drop_brackets=rule.get("drop_brackets", True),

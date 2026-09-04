@@ -160,9 +160,11 @@ def plan_folder(path, rules, recursive=False, extensions=None, report=None):
     for full in files:
         by_dir.setdefault(os.path.dirname(full), []).append(os.path.basename(full))
 
-    wants_tags = any(r.get("type") == "tag_music" for r in rules or [])
+    wants_auto = any(r.get("type") == "auto_file" for r in rules or [])
+    wants_tags = wants_auto or any(r.get("type") == "tag_music" for r in rules or [])
     rows = []
     common_report = {}
+    style_counts = {}
 
     for directory, names in by_dir.items():
         try:
@@ -187,6 +189,16 @@ def plan_folder(path, rules, recursive=False, extensions=None, report=None):
             row["folder"] = os.path.relpath(directory, root) if directory != root else ""
             row["old_path"] = os.path.join(directory, row["old"])
             row["new_path"] = os.path.join(directory, row["new"])
+
+            if wants_auto:
+                # Say which style each file got. In a download folder holding
+                # films and episodes together they are no longer all the same,
+                # so the user has to be able to see it.
+                stem, ext = engine.split_name(row["old"])
+                style = engine.auto_style(stem, ext, context["tags"].get(row["old"]))
+                row["style"] = engine.AUTO_STYLES[style][0]
+                style_counts[row["style"]] = style_counts.get(row["style"], 0) + 1
+
             rows.append(row)
 
     order = {full: i for i, full in enumerate(files)}
@@ -194,6 +206,7 @@ def plan_folder(path, rules, recursive=False, extensions=None, report=None):
 
     if report is not None:
         report["common"] = common_report
+        report["styles"] = style_counts
 
     return rows
 
