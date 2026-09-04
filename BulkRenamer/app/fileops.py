@@ -13,6 +13,7 @@ import time
 import uuid
 
 import engine
+import tags
 
 UNDO_DIR = "undo"
 UNDO_FILE = "last-batch.json"
@@ -143,17 +144,25 @@ def preferred_start():
     return os.path.expanduser("~")
 
 
-def plan_folder(path, rules, recursive=False, extensions=None):
+def plan_folder(path, rules, recursive=False, extensions=None, report=None):
     """Preview for a real folder. Groups by directory so that collision checks
-    are made against the right set of neighbours when running recursively."""
+    are made against the right set of neighbours when running recursively.
+
+    report: an optional dict that is filled in with what the run noticed -
+    currently the words every file in a folder shares, so the app can say what
+    it removed instead of deleting them silently.
+    """
     files = list_folder(path, recursive, extensions)
+    root = os.path.abspath(path)
 
     by_dir = {}
 
     for full in files:
         by_dir.setdefault(os.path.dirname(full), []).append(os.path.basename(full))
 
+    wants_tags = any(r.get("type") == "tag_music" for r in rules or [])
     rows = []
+    common_report = {}
 
     for directory, names in by_dir.items():
         try:
@@ -161,11 +170,21 @@ def plan_folder(path, rules, recursive=False, extensions=None):
         except OSError:
             existing = names
 
-        context = {"folder": os.path.basename(directory.rstrip(os.sep)) or directory}
+        stems = [engine.split_name(n)[0] for n in names]
+        common = engine.common_tail_words(stems)
+        common_report[directory] = sorted(engine.tail_run_words(stems, common))
+
+        context = {
+            "folder": os.path.basename(directory.rstrip(os.sep)) or directory,
+            "common": common,
+            "tags": tags.read_folder([os.path.join(directory, n) for n in names])
+                    if wants_tags else {},
+        }
 
         for row in engine.plan(names, rules, existing=existing, context=context):
             row = dict(row)
             row["dir"] = directory
+            row["folder"] = os.path.relpath(directory, root) if directory != root else ""
             row["old_path"] = os.path.join(directory, row["old"])
             row["new_path"] = os.path.join(directory, row["new"])
             rows.append(row)
@@ -173,7 +192,79 @@ def plan_folder(path, rules, recursive=False, extensions=None):
     order = {full: i for i, full in enumerate(files)}
     rows.sort(key=lambda r: order.get(r["old_path"], 0))
 
+    if report is not None:
+        report["common"] = common_report
+
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Working out what kind of folder this is
+# ---------------------------------------------------------------------------
+
+VIDEO_EXTENSIONS = {"mkv", "mp4", "avi", "m4v", "mov", "wmv", "mpg", "mpeg", "ts",
+                    "webm", "divx", "flv", "m2ts", "rmvb"}
+MUSIC_EXTENSIONS = {"mp3", "flac", "m4a", "wav", "ogg", "opus", "wma", "aiff", "ape",
+                    "alac"}
+
+
+def detect_preset(path, recursive=False, extensions=None):
+    """Guess which naming style this folder wants.
+
+    The client asked for it, and two of their bug reports turned out to be the
+    wrong style left selected from a previous folder - the tool did as it was
+    told and produced a name they never wanted. Guessing from the contents is
+    the fix: a folder of episodes is obvious from the filenames, and a folder of
+    MP3s is obvious from the extensions.
+
+    Returns a (preset_id, reason) pair. The reason is shown in the app, because
+    a guess the user cannot see is a guess they cannot correct.
+    """
+    try:
+        files = list_folder(path, recursive, extensions)
+    except ValueError:
+        return None, ""
+
+    names = [os.path.basename(f) for f in files]
+
+    if not names:
+        return None, ""
+
+    def ext_of(name):
+        return os.path.splitext(name)[1].lower().lstrip(".")
+
+    video = [n for n in names if ext_of(n) in VIDEO_EXTENSIONS]
+    music = [n for n in names if ext_of(n) in MUSIC_EXTENSIONS]
+
+    if music and len(music) >= len(video):
+        tagged = 0
+
+        for full in files[:12]:
+            found = tags.read(full)
+
+            if found.get("artist") and found.get("title"):
+                tagged += 1
+
+        if tagged >= 2:
+            return "tag_music", "{} music files, and the artist is written in the tags".format(len(music))
+
+        folder = os.path.basename(os.path.abspath(path).rstrip(os.sep))
+
+        if " - " in folder:
+            return "album", "music files in a folder named like \"Artist - Album\""
+
+        return "artist_song", "{} music files".format(len(music))
+
+    if video:
+        episodes = sum(1 for n in video if engine.find_episode(engine.split_name(n)[0]))
+
+        if episodes >= max(1, len(video) // 2):
+            return "tv_client", "{} of {} video files carry an episode number".format(
+                episodes, len(video))
+
+        return "movie", "{} video files, none of them numbered like episodes".format(len(video))
+
+    return "clean", "no video or music files here"
 
 
 def apply_plan(rows):

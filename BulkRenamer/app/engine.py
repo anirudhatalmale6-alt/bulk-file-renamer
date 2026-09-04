@@ -187,7 +187,116 @@ def drop_the(text):
     return _collapse(_THE.sub(" ", text))
 
 
-def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True, protect=None):
+def _words(text):
+    return [w for w in _normalise_separators(text).split(" ") if w]
+
+
+# Fewer than this many files is not evidence. With two names, any word they
+# happen to share looks "common", and half of it would be a real title.
+MIN_FILES_FOR_COMMON = 3
+
+
+def common_tail_words(stems, minimum=MIN_FILES_FOR_COMMON):
+    """Words that appear in EVERY name in the batch.
+
+    The client's observation: "Lots of films and movies postfix a group name or
+    resolution ... that is always the same across the episodes". A release group
+    like "hpcmpc" or "SuSpEcT" is not on any junk list and never will be - there
+    are thousands of them. But it is identifiable without a list: it is the text
+    that does not change from episode to episode, while an episode title does.
+
+    Only the words are returned; where they may be removed from is decided by
+    drop_tail_words(), which never reaches past the first word that differs.
+    """
+    stems = [s for s in stems if s and s.strip()]
+
+    if len(stems) < minimum:
+        return set()
+
+    sets = [{w.lower() for w in _words(stem)} for stem in stems]
+
+    return set.intersection(*sets) if sets else set()
+
+
+def drop_tail_words(text, words, protect=None, keep_letters=True):
+    """Remove common words from the END of a name, stopping at the first that
+    is not common.
+
+    Working backwards is what keeps an episode title safe. In
+    "S01E06 Family Limitation SuSpEcT 720p hpcmpc" the last three words are in
+    every file, so they go; "Limitation" is not, so the walk stops there and
+    "Family Limitation" survives untouched.
+
+    keep_letters: refuse the whole removal if it would leave nothing but
+    numbers. Three holiday photos called "1 Holiday", "2 Holiday", "3 Holiday"
+    share the word "Holiday" at the end, and dropping it would rename them to
+    "1", "2" and "3" - technically what the rule says, and obviously not what
+    anybody wants. Switched off when trimming an episode title, where reducing
+    the fragment to nothing is the correct answer.
+    """
+    if not words:
+        return text
+
+    protect = {w.strip().lower() for w in (protect or []) if w.strip()}
+    parts = _words(text)
+    kept = list(parts)
+
+    while kept and kept[-1].lower() in words and kept[-1].lower() not in protect:
+        kept.pop()
+
+    if keep_letters and not any(re.search(r"[a-z]", w, re.I) for w in kept):
+        return _collapse(" ".join(parts))
+
+    return _collapse(" ".join(kept))
+
+
+def tail_run_words(stems, words):
+    """Of the words common to every file, the ones actually at the end of a name.
+
+    The common set legitimately includes the show's own name - every episode of
+    Boardwalk Empire contains "Boardwalk". Those are never removed, because the
+    walk stops at the episode number, so listing them in the app would say the
+    tool is deleting something it is not. This narrows the list to what really
+    goes.
+    """
+    if not words:
+        return set()
+
+    out = set()
+
+    for stem in stems:
+        parts = _words(stem)
+
+        while parts and parts[-1].lower() in words:
+            out.add(parts.pop().lower())
+
+    return out
+
+
+def safe_filename_text(text):
+    """Make text from a tag usable as a filename.
+
+    Tags are written by people, so they contain the characters Windows forbids -
+    "AC/DC" being the obvious one. Refusing the file would be pedantic when the
+    fix is unambiguous.
+    """
+    text = straighten_quotes(str(text or ""))
+
+    for char in "/\\":
+        text = text.replace(char, "-")
+
+    text = text.replace(":", " -")
+
+    for char in ILLEGAL_CHARS:
+        text = text.replace(char, "")
+
+    text = "".join(c for c in text if ord(c) >= 32)
+
+    return _collapse(text)
+
+
+def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True, protect=None,
+               common=None):
     """Remove release tags, bracketed noise, date stamps and separator clutter.
 
     protect: words that must survive whatever the junk list says. A performer,
@@ -228,6 +337,11 @@ def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True, prote
     if drop_year:
         text = _YEAR.sub(" ", text)
 
+    # Last, because a tag removed above may have been sitting between two
+    # words that are common to the whole batch.
+    if common:
+        text = drop_tail_words(text, common, protect)
+
     return _collapse(text)
 
 
@@ -265,11 +379,17 @@ def _fix_word(word, fixes):
 _CODE_SHAPE = re.compile(r"^(?:s\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3}|\d{1,3}of\d{1,3})$", re.I)
 
 
-def title_words(text, fixes=None):
+def title_words(text, fixes=None, trust_case=False):
     """Capitalise every word, which is the rule the client actually asked for.
 
     Deliberately not smart_title(): that lowercases small words, so "Band of
     Brothers" would never become "Band Of Brothers".
+
+    trust_case: leave any word that already contains a capital exactly as it is.
+    Used for text taken from a music tag, where somebody has already typed the
+    name properly and flattening it does real damage - "AC/DC" would come back
+    as "Ac-Dc". A tag written entirely in lower case is still capitalised, which
+    is the case that needed fixing in the first place.
     """
     fixes = dict(DEFAULT_WORD_FIXES, **(fixes or {}))
     text = straighten_quotes(text)
@@ -286,6 +406,10 @@ def title_words(text, fixes=None):
             continue
 
         if _CODE_SHAPE.match(word):
+            out.append(word)
+            continue
+
+        if trust_case and re.search(r"[A-Z]", word):
             out.append(word)
             continue
 
@@ -469,12 +593,12 @@ def episode_code(season, episode, total=None, seasons=None):
     return "S{}E{:02d}".format(season if season else 1, episode)
 
 
-def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False):
+def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False, common=None):
     """Showname + episode code + episode title, to the client's spec."""
     found = find_episode_span(stem)
 
     if not found:
-        return title_words(strip_junk(stem, drop_year=True, protect=protect), fixes)
+        return title_words(strip_junk(stem, drop_year=True, protect=protect, common=common), fixes)
 
     before, season, episode, after = found
 
@@ -500,8 +624,12 @@ def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False):
     else:
         show = title_words(strip_junk(before, drop_year=True, protect=protect), fixes)
 
-    # An episode title, when the filename actually carries one.
+    # An episode title, when the filename actually carries one. Anything the
+    # whole batch shares at the end of the name is release clutter, not a title -
+    # and here it is right for that to consume the fragment entirely, since an
+    # episode with no title should end at the episode number.
     title = strip_junk(after, drop_year=True, protect=protect)
+    title = drop_tail_words(title, common, protect, keep_letters=False)
     title = re.sub(r"^[\s\-_.]+", "", title)
 
     if _PLACEHOLDER_TITLE.match(title.strip()):
@@ -570,6 +698,36 @@ def preset_artist_song(stem, artists=None, fixes=None, protect=None):
         return smart_title(_collapse(text))
 
     return "{} - {}".format(smart_title(artist), smart_title(song))
+
+
+def preset_tag_music(stem, entry=None, fixes=None, artists=None, protect=None,
+                     use_track=False):
+    """'Artist - Song' taken from the file's own tags.
+
+    The client's point: an MP3 or FLAC nearly always has the artist written
+    inside it, and that is a fact rather than a guess at where a name splits.
+    When the tags are missing or half-filled, this falls straight back to the
+    filename rules, so a folder of mixed files still comes out sensibly.
+    """
+    entry = entry or {}
+
+    artist = safe_filename_text(entry.get("artist") or entry.get("albumartist") or "")
+    title = safe_filename_text(entry.get("title") or "")
+
+    if not artist or not title:
+        return preset_artist_song(stem, artists, fixes, protect)
+
+    name = "{} - {}".format(title_words(artist, fixes, trust_case=True),
+                            title_words(title, fixes, trust_case=True))
+
+    if use_track:
+        # "1/12" is a legal tag value; only the part before the slash is wanted.
+        track = str(entry.get("track") or "").split("/")[0].strip()
+
+        if track.isdigit():
+            name = "{:02d} - {}".format(int(track), name)
+
+    return _collapse(name)
 
 
 def preset_show_episode(stem, style="S{season:02d}E{episode:02d}"):
@@ -660,27 +818,37 @@ def _rule_trim(stem, rule):
     return stem[count:]
 
 
-def apply_rules(stem, ext, rules, index=0, context=None):
+def apply_rules(stem, ext, rules, index=0, context=None, filename=None):
     """Run every rule in order. Returns (stem, ext).
 
-    context carries facts about where the file lives - currently just the
-    containing folder name, which is where an album's artist is written.
+    context carries facts about where the file lives: the containing folder
+    name (where an album's artist is written), the words every file in the
+    batch shares, and any tags read from the files themselves.
     """
     context = context or {}
+    tags = (context.get("tags") or {}).get(filename or "", {})
+
     for rule in rules or []:
         kind = rule.get("type")
 
+        # A rule may switch the shared-word removal off; by default it is on
+        # wherever it can help.
+        common = context.get("common") if rule.get("drop_common", True) else None
+
         if kind == "preset_tv":
             stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"), rule.get("protect"),
-                             bool(rule.get("add_titles")))
+                             bool(rule.get("add_titles")), common)
         elif kind == "preset_artist_song":
             stem = preset_artist_song(stem, rule.get("artists"), rule.get("fixes"), rule.get("protect"))
+        elif kind == "tag_music":
+            stem = preset_tag_music(stem, tags, rule.get("fixes"), rule.get("artists"),
+                                    rule.get("protect"), bool(rule.get("use_track")))
         elif kind == "preset_show_episode":
             stem = preset_show_episode(stem, rule.get("style", "S{season:02d}E{episode:02d}"))
         elif kind == "strip_junk":
             stem = strip_junk(stem, drop_year=bool(rule.get("drop_year")),
                               drop_brackets=rule.get("drop_brackets", True),
-                              protect=rule.get("protect"))
+                              protect=rule.get("protect"), common=common)
         elif kind == "find_replace":
             stem = _rule_find_replace(stem, rule)
         elif kind == "case":
@@ -766,6 +934,17 @@ def plan(filenames, rules, existing=None, context=None):
     """
     existing_set = {n.lower() for n in (existing if existing is not None else filenames)}
 
+    # Work out what the whole batch has in common before touching any of it -
+    # that is the only place a release group like "hpcmpc" can be identified,
+    # and it has to be the same set for every file or the results would differ
+    # depending on where in the list a file sits.
+    context = dict(context or {})
+
+    # The app passes this in so it can also show the user what it found; when
+    # the engine is used directly it works it out itself.
+    if context.get("common") is None:
+        context["common"] = common_tail_words([split_name(f)[0] for f in filenames])
+
     # Pass one: work out what each file wants to be called. Collisions cannot be
     # judged yet, because a name may be freed up by a file later in the list -
     # renaming 01,02,03 up to 02,03,04 is perfectly legal but every single step
@@ -776,7 +955,7 @@ def plan(filenames, rules, existing=None, context=None):
         stem, ext = split_name(filename)
 
         try:
-            new_stem, new_ext = apply_rules(stem, ext, rules, index, context)
+            new_stem, new_ext = apply_rules(stem, ext, rules, index, context, filename)
         except Exception as exc:  # a bad rule must never kill the whole preview
             rows.append({"old": filename, "new": filename, "status": "error",
                          "reason": "rule failed: {}".format(exc)})

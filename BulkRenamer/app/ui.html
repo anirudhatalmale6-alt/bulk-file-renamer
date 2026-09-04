@@ -69,6 +69,9 @@
     padding: 5px 12px; cursor: pointer; font-size: 13px;
   }
   .chip:hover { border-color: var(--accent); }
+  .chip.on {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
@@ -116,7 +119,7 @@
 <body>
 
 <header>
-  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.4</span></h1>
+  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.5</span></h1>
   <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
 </header>
 
@@ -175,17 +178,19 @@
 
   <section>
     <h2>2 &nbsp;What should the names look like?</h2>
-    <div class="row" style="margin-bottom:12px">
+    <div class="row" style="margin-bottom:6px">
       <span class="muted">Click one:</span>
       <span id="presets"></span>
     </div>
+    <div id="autoNote" class="muted" style="margin-bottom:12px"></div>
     <div id="rules"></div>
    <details id="morerules">
     <summary class="muted">Add your own rules, or load a saved set</summary>
     <div class="row" style="margin-top:10px">
       <select id="addType">
         <option value="preset_tv">TV: Showname S3E05 Title (your format)</option>
-        <option value="preset_artist_song">Music: Artist - Song</option>
+        <option value="tag_music">Music: Artist - Song, read from the tags</option>
+        <option value="preset_artist_song">Music: Artist - Song (from the filename)</option>
         <option value="folder_artist">Music album: Artist (from folder) - Song</option>
         <option value="drop_the">Remove the word "The"</option>
         <option value="preset_show_episode">TV: Showname S01E01 (plain)</option>
@@ -213,10 +218,11 @@
     <h2>3 &nbsp;Preview</h2>
     <div id="msg"></div>
     <div class="summary" id="summary"></div>
+    <div id="commonNote" class="muted" style="margin-bottom:8px"></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th class="pick"><input type="checkbox" id="pickAll" title="select all / none" /></th><th>Now</th><th>After</th><th>Status</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="4" class="muted">Choose a folder to begin.</td></tr></tbody>
+        <thead><tr><th class="pick"><input type="checkbox" id="pickAll" title="select all / none" /></th><th id="thFolder" style="display:none">Folder</th><th>Now</th><th>After</th><th>Status</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted">Choose a folder to begin.</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -242,6 +248,8 @@ let SEP = "\\";
 let SYSTEM_DRIVE = "C:";
 let allowSystem = false;
 let PICKED = null;   // null = everything that can be renamed; otherwise a Set of paths
+let AUTO = true;     // let the folder decide the style until the user picks one
+let ACTIVE = "";     // which preset chip is lit
 
 const $ = (id) => document.getElementById(id);
 
@@ -281,6 +289,9 @@ function note(kind, text) {
 const FIELDS = {
   preset_tv: [],
   preset_artist_song: [],
+  tag_music: [
+    { key: "use_track", type: "check", label: "put the track number in front" }
+  ],
   folder_artist: [
     { key: "artist", type: "text", label: "artist (blank = take it from the folder name)", width: 240 }
   ],
@@ -328,12 +339,22 @@ const LABELS = {
   preset_tv: "TV: Showname S3E05 Title (your format)",
   case_every_word: "Capitalise Every Word",
   preset_artist_song: "Music: Artist - Song",
+  tag_music: "Music: Artist - Song, read from the tags",
   folder_artist: "Music album: Artist (from folder) - Song",
   drop_the: 'Remove the word "The"', preset_show_episode: "TV: Showname S01E01 (plain)",
   strip_junk: "Strip download junk", find_replace: "Find and replace",
   case: "Change capitalisation", insert: "Add prefix / suffix", number: "Add numbering",
   trim: "Remove characters", ext_lower: "Lowercase the extension", set_ext: "Change the extension"
 };
+
+function takeOver() {
+  // The user has said what they want; stop guessing at it.
+  if (!AUTO) return;
+  AUTO = false;
+  ACTIVE = "";
+  markActive();
+  renderAutoNote(null);
+}
 
 function renderRules() {
   const host = $("rules");
@@ -360,14 +381,14 @@ function renderRules() {
       const b = document.createElement("button");
       b.textContent = txt;
       b.disabled = (dir < 0 && i === 0) || (dir > 0 && i === RULES.length - 1);
-      b.onclick = () => { const t = RULES[i + dir]; RULES[i + dir] = RULES[i]; RULES[i] = t; renderRules(); preview(); };
+      b.onclick = () => { const t = RULES[i + dir]; RULES[i + dir] = RULES[i]; RULES[i] = t; takeOver(); renderRules(); preview(); };
       head.appendChild(b);
     });
 
     const del = document.createElement("button");
     del.textContent = "Remove";
     del.className = "danger";
-    del.onclick = () => { RULES.splice(i, 1); renderRules(); preview(); };
+    del.onclick = () => { RULES.splice(i, 1); takeOver(); renderRules(); preview(); };
     head.appendChild(del);
 
     box.appendChild(head);
@@ -404,6 +425,9 @@ function renderRules() {
         rule[f.key] = f.type === "check" ? input.checked
                     : f.type === "number" ? Number(input.value)
                     : input.value;
+        // Editing a rule by hand means the automatic choice is no longer
+        // wanted - otherwise the next preview would quietly undo the edit.
+        takeOver();
         preview();
       };
       input.addEventListener("change", commit);
@@ -438,8 +462,48 @@ function payload() {
     protect_text: $("protectText").value,
     lookup: $("lookup").checked,
     add_titles: $("addTitles").checked,
-    allow_system: allowSystem
+    allow_system: allowSystem,
+    auto: AUTO
   };
+}
+
+function markActive() {
+  document.querySelectorAll("#presets .chip").forEach(chip => {
+    chip.classList.toggle("on", chip.dataset.id === (AUTO ? "__auto__" : ACTIVE));
+  });
+}
+
+function renderAutoNote(data) {
+  const host = $("autoNote");
+
+  if (!AUTO) {
+    host.textContent = "";
+    return;
+  }
+
+  if (!data || !data.auto) {
+    host.textContent = "Nothing here to go on yet — choose a folder, or pick a style yourself.";
+    return;
+  }
+
+  const preset = PRESETS.filter(p => p.id === data.auto)[0];
+  host.textContent = "Chosen for this folder: " + (preset ? preset.label : data.auto) +
+    (data.auto_reason ? "  —  " + data.auto_reason + "." : "") +
+    "  If that is not what you want, click a different one.";
+}
+
+function renderCommonNote(common) {
+  const host = $("commonNote");
+  const words = [];
+
+  Object.keys(common || {}).forEach(dir => (common[dir] || []).forEach(w => {
+    if (words.indexOf(w) === -1) words.push(w);
+  }));
+
+  host.textContent = words.length
+    ? "Every file here ends with the same words, so they are treated as release "
+      + "clutter and dropped: " + words.join(", ")
+    : "";
 }
 
 function renameable() {
@@ -530,6 +594,18 @@ async function preview(keepMessage) {
 
       LAST = data;
 
+      // In automatic mode the server decides the rules; show them, so the
+      // panel below is never out of step with what the preview actually did.
+      if (AUTO && data.rules) {
+        RULES = data.rules;
+        ACTIVE = data.auto || "";
+        renderRules();
+        markActive();
+      }
+
+      renderAutoNote(data);
+      renderCommonNote(data.common);
+
       // Keep the user's ticks across a refresh. A textarea only fires its
       // change event on blur, so typing in a box and then clicking a row
       // checkbox lands a preview AFTER the click - throwing the selection away
@@ -554,7 +630,7 @@ async function preview(keepMessage) {
     } catch (e) {
       if (mine !== previewSeq) return;
       note("err", e.message);
-      $("rows").innerHTML = '<tr><td colspan="4" class="muted">—</td></tr>';
+      $("rows").innerHTML = '<tr><td colspan="5" class="muted">—</td></tr>';
       $("summary").innerHTML = "";
       $("apply").disabled = true;
     }
@@ -571,8 +647,14 @@ function renderPreview() {
   const tb = $("rows");
   tb.innerHTML = "";
 
+  // A folder column is only worth its width when the files are actually
+  // spread over more than one folder.
+  const showFolder = rows.some(r => r.folder);
+  const cols = showFolder ? 5 : 4;
+  $("thFolder").style.display = showFolder ? "" : "none";
+
   if (!rows.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="muted">No files here matching that filter.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="' + cols + '" class="muted">No files here matching that filter.</td></tr>';
   }
 
   rows.slice(0, 2000).forEach((r) => {
@@ -596,6 +678,12 @@ function renderPreview() {
 
     tr.appendChild(pick);
 
+    if (showFolder) {
+      const f = document.createElement("td");
+      f.className = "muted"; f.textContent = r.folder || "";
+      tr.appendChild(f);
+    }
+
     const a = document.createElement("td"); a.className = "old"; a.textContent = r.old;
     const b = document.createElement("td"); b.className = "new";
     b.textContent = r.status === "unchanged" ? "(no change)" : r.new;
@@ -616,7 +704,7 @@ function renderPreview() {
 
   if (rows.length > 2000) {
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="4" class="muted">Showing the first 2000 of ' + rows.length +
+    tr.innerHTML = '<td colspan="' + cols + '" class="muted">Showing the first 2000 of ' + rows.length +
       ' files. Renaming still covers all of them.</td>';
     tb.appendChild(tr);
   }
@@ -634,8 +722,30 @@ function renderPreview() {
 }
 
 // ---------------------------------------------------------------- actions
+function shownNames() {
+  const out = {};
+  (LAST.rows || []).forEach(r => { out[r.old_path] = r.new; });
+  return out;
+}
+
 $("apply").onclick = async () => {
+  // What was on screen when the button was pressed. A text box only fires its
+  // change event on blur, so clicking Rename can itself start a fresh preview -
+  // and the client hit exactly that: something was removed on rename that the
+  // preview had never shown. Everything below exists to make that impossible.
+  const before = shownNames();
+
   if (pendingPreview) { try { await pendingPreview; } catch (e) {} }
+
+  const after = shownNames();
+  const drifted = Object.keys(after).filter(p => before[p] !== undefined && before[p] !== after[p]);
+
+  if (drifted.length) {
+    note("note", "The names changed as you pressed the button (" + drifted.length +
+      " of them) — most likely a box you had just typed in. The new list is above; "
+      + "check it and press Rename again. Nothing has been renamed.");
+    return;
+  }
 
   const n = pickedRows().length;
 
@@ -649,7 +759,22 @@ $("apply").onclick = async () => {
   $("apply").disabled = true;
   try {
     const chosen = pickedRows().map(r => r.old_path);
-    const res = await api("/api/apply", Object.assign(payload(), { only: chosen }));
+    // The server works the plan out again rather than trusting the browser, so
+    // it is also told what the user was shown. If the two disagree it renames
+    // nothing at all.
+    const expect = {};
+    pickedRows().forEach(r => { expect[r.old_path] = r.new; });
+
+    const res = await api("/api/apply", Object.assign(payload(), { only: chosen, expect: expect }));
+
+    if (res.changed && res.changed.length) {
+      await preview(true);
+      note("note", "Nothing was renamed. The folder no longer matches what you were shown — "
+        + res.changed[0].old + " would now become \"" + res.changed[0].now + "\" instead of \""
+        + res.changed[0].shown + "\". The list above is up to date.");
+      return;
+    }
+
     setUndo(res.undo);
     await preview(true);            // refresh first, so the message survives it
     if (res.errors.length) {
@@ -700,6 +825,7 @@ $("addRule").onclick = () => {
   const rule = { type: type };
   (FIELDS[type] || []).forEach(f => { if (f.def !== undefined) rule[f.key] = f.def; });
   RULES.push(rule);
+  takeOver();
   renderRules();
   preview();
 };
@@ -835,12 +961,28 @@ function buildTree(drives) {
     setUndo(data.undo);
 
     const host = $("presets");
+
+    // Their question: "can you preselect the options based on the file type?"
+    // Yes - and it leads, because a style left over from the last folder is
+    // what produced two of the wrong names they reported.
+    const auto = document.createElement("button");
+    auto.className = "chip"; auto.dataset.id = "__auto__";
+    auto.textContent = "Automatic — match the folder";
+    auto.onclick = () => { AUTO = true; ACTIVE = ""; markActive(); preview(); };
+    host.appendChild(auto);
+
     PRESETS.forEach(p => {
       const b = document.createElement("button");
-      b.className = "chip"; b.textContent = p.label;
-      b.onclick = () => { RULES = JSON.parse(JSON.stringify(p.rules)); renderRules(); preview(); };
+      b.className = "chip"; b.textContent = p.label; b.dataset.id = p.id;
+      b.onclick = () => {
+        AUTO = false; ACTIVE = p.id;
+        RULES = JSON.parse(JSON.stringify(p.rules));
+        markActive(); renderAutoNote(null); renderRules(); preview();
+      };
       host.appendChild(b);
     });
+
+    markActive();
 
     SYSTEM_DRIVE = data.system_drive || "C:";
     buildTree(data.drives);

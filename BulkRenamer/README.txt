@@ -36,8 +36,21 @@ type or paste a path in the box instead. Tick "include sub-folders" to work
 through everything underneath as well. The "only these types" box limits it
 to certain files - type mkv, mp4, mp3 and it will leave everything else alone.
 
-STEP 2 - build a rule.
-Press one of the starting points:
+STEP 2 - the naming style.
+The first button is "Automatic - match the folder", and it is on to start
+with. The program looks at what is actually in the folder and picks the style
+that fits: episode numbers in the filenames means the TV format, music files
+mean the music format, and so on. It writes underneath which one it chose and
+why, so you can see it was not a guess in the dark.
+
+If it picks wrongly, click any other button and that choice sticks until you
+hand it back by clicking "Automatic" again.
+
+This matters more than it sounds. The commonest way to get a name you did not
+want is a style left selected from the last folder - the program does exactly
+as it is told and produces something odd. Automatic removes that trap.
+
+The styles are:
 
   TV: Showname S3E05 Title    your format. Turns
                               "The Americans 2013 S02E01 HDTV XviD-FUM"
@@ -57,9 +70,26 @@ Press one of the starting points:
                            Edit).mp3" gives "Creedence Clearwater Revival -
                            Susie Q.mp3". Track numbers and bracketed notes go.
 
-  Music: Artist - Song     turns "01 - Radiohead - Karma Police.mp3" and
-                           "Radiohead_-_Karma_Police.mp3" into
-                           "Radiohead - Karma Police.mp3"
+  Music: Artist - Song,    reads the artist and title out of the file
+  read from the tags       itself. An MP3 or FLAC nearly always carries them,
+                           and a tag is a fact where a filename is only a
+                           guess - so a track called "01. track one.mp3" still
+                           comes out as "Creedence Clearwater Revival -
+                           Susie Q.mp3". MP3 (both the modern tag and the old
+                           128-byte one at the end of the file) and FLAC are
+                           read. A file with no usable tags quietly falls back
+                           to the filename rules, so a mixed folder still
+                           works. A tag already typed properly is left as it
+                           is - "AC/DC" does not become "Ac-Dc" - while an
+                           all-lowercase tag is capitalised. A slash in a tag
+                           becomes a dash, because Windows will not allow one
+                           in a filename. There is a tick box to put the track
+                           number in front as well.
+
+  Music: Artist - Song,    turns "01 - Radiohead - Karma Police.mp3" and
+  from the filename        "Radiohead_-_Karma_Police.mp3" into
+                           "Radiohead - Karma Police.mp3". Use this when the
+                           files have no tags.
 
   TV: Showname S01E01      turns "The.Bear.S03E07.1080p.WEB-DL.x265.mkv"
                            into "The Bear S03E07.mkv". It understands
@@ -82,6 +112,36 @@ The TV preset also removes the word "The" anywhere in a name, so
 padded - S1, S2, and S10 only when a show really has ten or more seasons.
 If you ever want "The" kept, delete the "Remove the word The" rule from the
 list after clicking the preset.
+
+TEXT THAT IS THE SAME IN EVERY FILE
+-----------------------------------
+
+Downloads carry a release group or a resolution on the end, and it is the
+same across every episode:
+
+    The_Boardwalk.Empire.S01E03 SuSpEcT 720p hpcmpc.avi
+    The_Boardwalk.Empire.S01E04 SuSpEcT 720p hpcmpc.avi
+    The_Boardwalk.Empire.S01E06 Family Limitation SuSpEcT 720p hpcmpc.avi
+
+"SuSpEcT" and "hpcmpc" are on no junk list anywhere - there are thousands of
+release groups and new ones every week. But they do not need to be on a list.
+They are the words that do not change from one episode to the next, while an
+episode name does. So the program compares the files in the folder and drops
+what they all end with:
+
+    Boardwalk Empire S1E03.avi
+    Boardwalk Empire S1E04.avi
+    Boardwalk Empire S1E06 Family Limitation.avi
+
+Note that "Family Limitation" survives: it is in one file only, so it is a
+title, not clutter. And "Boardwalk" is in every file too but is never touched,
+because the comparison works backwards from the end of the name and stops at
+the episode number.
+
+It needs at least three files to have anything to compare, it never strips a
+name down to just a number, and it leaves anything in the "never remove these
+words" box alone. The line above the preview always names what it removed.
+
 
 STEP 3 - check the preview.
 Every file is listed with its current name and the name it would get. Green
@@ -139,15 +199,8 @@ ARTISTS - one per line, so the tool knows where the name ends:
     brian kennedy = Brian Kennedy
     daft punk = Daft Punk
 
-LOOKING THINGS UP
------------------
-
-There is a tick box, off by default: "Look episode titles and counts up
-online". With it on, the program asks TVmaze (a free TV database, no account
-needed) for the episode name, the episode count and the number of seasons.
-That is what makes "Comrades" and "05of10" appear by themselves.
-
-With it off, nothing whatsoever leaves your PC.
+MORE ON THE LOOKUP
+------------------
 
 Answers are saved, so running the same folder again needs no connection. The
 line under the tick box tells you which series it matched, with the year -
@@ -157,6 +210,15 @@ episode titles from the wrong one.
 Your own show names always win. If you have written "The Americans =
 A - Americans", a lookup will not overrule it; it only fills in the facts you
 would otherwise have to type.
+
+
+THE FOLDER COLUMN
+-----------------
+
+With "include sub-folders" ticked, a Folder column appears in the preview
+showing which folder each file is in, so a season pack is readable at a
+glance. With everything in one folder the column is hidden, since it would
+say the same thing on every line.
 
 
 CHOOSING WHICH FILES
@@ -192,6 +254,13 @@ SAFETY
 ------
 
 Nothing is renamed until you press Rename and confirm.
+
+What you were shown is what gets done. If anything changed between the
+preview you were looking at and the moment you pressed the button - because
+you had just typed in a box, or something on disk moved - the batch stops,
+nothing is renamed, and the list is redrawn for you to check. The program
+works the names out again itself at that point rather than trusting what the
+screen had, so the two can never drift apart.
 
 Files that would end up with the same name are refused, not overwritten. If
 two files would both become "Radiohead - Karma Police.mp3", both are marked

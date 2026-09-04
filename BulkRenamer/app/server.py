@@ -73,10 +73,11 @@ def inject_tables(rules, shows, artists, protect=None, add_titles=False):
         if rule.get("type") == "preset_tv":
             rule["shows"] = shows
             rule["add_titles"] = add_titles
-        elif rule.get("type") == "preset_artist_song":
+        elif rule.get("type") in ("preset_artist_song", "tag_music"):
             rule["artists"] = artists
 
-        if rule.get("type") in ("preset_tv", "preset_artist_song", "strip_junk", "folder_artist"):
+        if rule.get("type") in ("preset_tv", "preset_artist_song", "tag_music",
+                                "strip_junk", "folder_artist"):
             rule["protect"] = protect
 
         out.append(rule)
@@ -91,13 +92,18 @@ PRESETS = [
         "rules": [{"type": "preset_tv"}, {"type": "drop_the"}],
     },
     {
+        "id": "tag_music",
+        "label": "Music:  Artist - Song, read from the tags",
+        "rules": [{"type": "tag_music"}],
+    },
+    {
         "id": "album",
         "label": "Music album:  Artist (from folder) - Song",
         "rules": [{"type": "folder_artist"}],
     },
     {
         "id": "artist_song",
-        "label": "Music:  Artist - Song",
+        "label": "Music:  Artist - Song, from the filename",
         "rules": [{"type": "preset_artist_song"}],
     },
     {
@@ -158,13 +164,37 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return {}
 
-    def _prepare(self, data):
+    def _choose_rules(self, data):
+        """The rules to run: the user's own, or the ones this folder asks for.
+
+        Auto mode exists because the client twice reported a naming bug that was
+        really a preset left over from the previous folder. The app now looks at
+        what is actually in the folder and says which style it picked and why,
+        so a wrong guess is visible instead of surprising.
+        """
+        rules = data.get("rules") or []
+
+        if not data.get("auto"):
+            return rules, None, ""
+
+        preset_id, reason = fileops.detect_preset(
+            data.get("path", ""), bool(data.get("recursive")),
+            data.get("extensions") or None,
+        )
+
+        for preset in PRESETS:
+            if preset["id"] == preset_id:
+                return [dict(rule) for rule in preset["rules"]], preset_id, reason
+
+        return rules, None, ""
+
+    def _prepare(self, data, rules=None):
         """Resolve alias tables and any lookup, then hand the rules over."""
         shows = parse_table(data.get("shows_text"))
         artists = parse_table(data.get("artists_text"))
         report = []
 
-        rules = data.get("rules") or []
+        rules = data.get("rules") or [] if rules is None else rules
         needs_shows = any(r.get("type") == "preset_tv" for r in rules)
 
         if needs_shows:
@@ -258,19 +288,25 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path == "/api/preview":
-                rules, report = self._prepare(data)
+                chosen, auto_id, auto_reason = self._choose_rules(data)
+                rules, report = self._prepare(data, chosen)
+                info = {}
                 rows = fileops.plan_folder(
                     data.get("path", ""),
                     rules,
                     bool(data.get("recursive")),
                     data.get("extensions") or None,
+                    report=info,
                 )
                 self._send(200, {"rows": rows, "summary": engine.summarise(rows),
-                                 "lookup": report})
+                                 "lookup": report, "auto": auto_id,
+                                 "auto_reason": auto_reason, "rules": chosen,
+                                 "common": info.get("common") or {}})
                 return
 
             if parsed.path == "/api/apply":
-                rules, report = self._prepare(data)
+                chosen, _auto_id, _auto_reason = self._choose_rules(data)
+                rules, report = self._prepare(data, chosen)
                 rows = fileops.plan_folder(
                     data.get("path", ""),
                     rules,
@@ -283,6 +319,27 @@ class Handler(BaseHTTPRequestHandler):
                 if only:
                     keep = set(only)
                     rows = [r for r in rows if r["old_path"] in keep]
+
+                # The plan is recomputed here rather than trusted from the
+                # browser, which is right - but it means it can differ from the
+                # table the user was looking at when they pressed the button
+                # (they edited a field, or something changed on disk). Renaming
+                # to something they were never shown is the one thing this tool
+                # must never do, so a difference stops the batch instead.
+                expect = data.get("expect") or {}
+
+                if expect:
+                    changed = [
+                        {"old": row["old"], "shown": expect.get(row["old_path"]),
+                         "now": row["new"]}
+                        for row in rows
+                        if row["old_path"] in expect and expect[row["old_path"]] != row["new"]
+                    ]
+
+                    if changed:
+                        self._send(200, {"done": 0, "errors": [], "changed": changed,
+                                         "undo": fileops.read_undo()})
+                        return
 
                 done, errors = fileops.apply_plan(rows)
                 self._send(200, {"done": len(done), "errors": errors,
@@ -330,7 +387,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer v1.4 is running.",
+        "  Bulk Renamer v1.5 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,
