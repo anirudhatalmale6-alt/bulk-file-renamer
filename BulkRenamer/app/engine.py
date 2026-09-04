@@ -66,6 +66,11 @@ _CODEC_NOTATION = re.compile(
     re.I,
 )
 
+# A release group left clinging to the end: "... 1080p MP4-KTR" becomes
+# " -KTR" once the tags around it go. Requires NO space after the dash, which
+# is what separates a group tag from a real "Artist - Song" title.
+_TRAILING_GROUP = re.compile(r"\s*-([A-Za-z0-9]{2,12})\s*$")
+
 # A date stamped into the name, as "21 06 13" or "2021 06 13" or "21.06.13".
 _DATE_STAMP = re.compile(r"\b(\d{2}|\d{4})[ ._-](\d{2})[ ._-](\d{2})\b")
 
@@ -158,8 +163,14 @@ def _normalise_separators(text):
     return _collapse(text)
 
 
-def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True):
-    """Remove release tags, bracketed noise, date stamps and separator clutter."""
+def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True, protect=None):
+    """Remove release tags, bracketed noise, date stamps and separator clutter.
+
+    protect: words that must survive whatever the junk list says. A performer,
+    band or show name can collide with a tag - somebody called "Cam" or "Eve"
+    would otherwise be deleted from their own filename.
+    """
+    protect = {w.strip().lower() for w in (protect or []) if w.strip()}
     text = _normalise_separators(text)
 
     if drop_brackets:
@@ -178,7 +189,17 @@ def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True):
     text = _CODEC_NOTATION.sub(" ", text)
 
     for token in JUNK_TOKENS:
+        if token in protect:
+            continue
+
         text = re.sub(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z0-9])", " ", text, flags=re.I)
+
+    # Do this after the tags have gone, so the group tag is what is left at the
+    # end. Never touch a protected word.
+    trailing = _TRAILING_GROUP.search(text)
+
+    if trailing and trailing.group(1).lower() not in protect:
+        text = text[: trailing.start()]
 
     if drop_year:
         text = _YEAR.sub(" ", text)
@@ -391,12 +412,12 @@ def episode_code(season, episode, total=None, seasons=None):
     return "S{}E{:02d}".format(season if season else 1, episode)
 
 
-def preset_tv(stem, shows=None, fixes=None):
+def preset_tv(stem, shows=None, fixes=None, protect=None):
     """Showname + episode code + episode title, to the client's spec."""
     found = find_episode_span(stem)
 
     if not found:
-        return title_words(strip_junk(stem, drop_year=True), fixes)
+        return title_words(strip_junk(stem, drop_year=True, protect=protect), fixes)
 
     before, season, episode, after = found
 
@@ -415,10 +436,10 @@ def preset_tv(stem, shows=None, fixes=None):
         titles = entry.get("titles") or {}
         known_title = titles.get("{}x{}".format(season, episode), "") or ""
     else:
-        show = title_words(strip_junk(before, drop_year=True), fixes)
+        show = title_words(strip_junk(before, drop_year=True, protect=protect), fixes)
 
     # An episode title, when the filename actually carries one.
-    title = strip_junk(after, drop_year=True)
+    title = strip_junk(after, drop_year=True, protect=protect)
     title = re.sub(r"^[\s\-_.]+", "", title)
 
     if _PLACEHOLDER_TITLE.match(title.strip()):
@@ -444,7 +465,7 @@ def preset_tv(stem, shows=None, fixes=None):
     return _collapse(" ".join(p for p in parts if p))
 
 
-def preset_artist_song(stem, artists=None, fixes=None):
+def preset_artist_song(stem, artists=None, fixes=None, protect=None):
     """Best effort at 'Artist - Song'.
 
     A dot-separated name like "brian.kennedy.you.raise.me.up" carries no clue
@@ -452,7 +473,7 @@ def preset_artist_song(stem, artists=None, fixes=None):
     unknowable from the text. So an optional artists table supplies the split
     point, the same way the shows table supplies a canonical show name.
     """
-    text = strip_junk(stem)
+    text = strip_junk(stem, protect=protect)
     text = _LEADING_TRACK.sub("", text)
 
     if artists:
@@ -583,14 +604,15 @@ def apply_rules(stem, ext, rules, index=0):
         kind = rule.get("type")
 
         if kind == "preset_tv":
-            stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"))
+            stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"), rule.get("protect"))
         elif kind == "preset_artist_song":
-            stem = preset_artist_song(stem, rule.get("artists"), rule.get("fixes"))
+            stem = preset_artist_song(stem, rule.get("artists"), rule.get("fixes"), rule.get("protect"))
         elif kind == "preset_show_episode":
             stem = preset_show_episode(stem, rule.get("style", "S{season:02d}E{episode:02d}"))
         elif kind == "strip_junk":
             stem = strip_junk(stem, drop_year=bool(rule.get("drop_year")),
-                              drop_brackets=rule.get("drop_brackets", True))
+                              drop_brackets=rule.get("drop_brackets", True),
+                              protect=rule.get("protect"))
         elif kind == "find_replace":
             stem = _rule_find_replace(stem, rule)
         elif kind == "case":

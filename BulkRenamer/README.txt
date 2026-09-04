@@ -126,6 +126,35 @@ A - Americans", a lookup will not overrule it; it only fills in the facts you
 would otherwise have to type.
 
 
+CHOOSING WHICH FILES
+--------------------
+
+Every row that will be renamed has a tick box on the left. Untick any you want
+left alone - the Rename button counts only the ticked ones. The box in the
+table header ticks or unticks everything at once.
+
+Your ticks survive a refresh, so you can untick a few files and then still
+adjust a rule without losing the selection.
+
+
+DRIVES
+------
+
+The C: drive is left alone by default. It is shown at the end of the drive
+list, marked "(system)", and if you point the program at a folder on it you
+get a warning and a button to allow it for that folder. Everything on D:
+upwards works normally, and the program opens on E:\download when that
+exists.
+
+
+KEEPING WORDS THE CLEANER WOULD REMOVE
+--------------------------------------
+
+The junk list removes things like "cam", "sub", "eng" and "web". Occasionally
+that is somebody's name. Put such words in the "Never remove these words" box,
+one per line or comma separated, and they are left alone everywhere.
+
+
 SAFETY
 ------
 

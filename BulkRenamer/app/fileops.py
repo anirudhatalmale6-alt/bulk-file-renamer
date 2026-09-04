@@ -84,10 +84,31 @@ def list_dirs(path):
     return out
 
 
-def drives():
-    """Windows drive letters, or / on anything else."""
+SYSTEM_DRIVE = (os.environ.get("SystemDrive") or "C:").rstrip("\\").upper()
+
+
+def is_system_path(path):
+    """Is this path on the Windows system drive?
+
+    The client works on D: upwards and asked for C: to be left alone unless
+    they pick it deliberately - renaming inside Windows or Program Files is
+    exactly the accident worth making hard.
+    """
     if os.name != "nt":
-        return [{"name": "/", "path": "/"}]
+        return False
+
+    try:
+        drive = os.path.splitdrive(os.path.abspath(path))[0].rstrip("\\").upper()
+    except (ValueError, TypeError):
+        return False
+
+    return bool(drive) and drive == SYSTEM_DRIVE
+
+
+def drives():
+    """Windows drive letters, or / on anything else. System drive flagged."""
+    if os.name != "nt":
+        return [{"name": "/", "path": "/", "system": False}]
 
     out = []
 
@@ -95,9 +116,31 @@ def drives():
         root = "{}:\\".format(letter)
 
         if os.path.exists(root):
-            out.append({"name": root, "path": root})
+            out.append({
+                "name": root,
+                "path": root,
+                "system": "{}:".format(letter).upper() == SYSTEM_DRIVE,
+            })
 
-    return out
+    # Data drives first; the system drive last and clearly marked.
+    return sorted(out, key=lambda d: (d["system"], d["name"]))
+
+
+def preferred_start():
+    """Where to open the folder box, avoiding the system drive.
+
+    Their words: "im mostly working in E:/download or the other ones."
+    """
+    if os.name == "nt":
+        for candidate in ("E:\\download", "E:\\Downloads", "E:\\"):
+            if os.path.isdir(candidate):
+                return candidate
+
+        for entry in drives():
+            if not entry["system"] and os.path.isdir(entry["path"]):
+                return entry["path"]
+
+    return os.path.expanduser("~")
 
 
 def plan_folder(path, rules, recursive=False, extensions=None):

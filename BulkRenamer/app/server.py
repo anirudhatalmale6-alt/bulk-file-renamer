@@ -9,6 +9,7 @@ nothing else on the PC can drive it.
 
 import json
 import os
+import re
 import secrets
 import sys
 import threading
@@ -62,7 +63,7 @@ def parse_table(text):
     return out
 
 
-def inject_tables(rules, shows, artists):
+def inject_tables(rules, shows, artists, protect=None):
     """Give the table-driven rules their data. The engine stays offline."""
     out = []
 
@@ -73,6 +74,9 @@ def inject_tables(rules, shows, artists):
             rule["shows"] = shows
         elif rule.get("type") == "preset_artist_song":
             rule["artists"] = artists
+
+        if rule.get("type") in ("preset_tv", "preset_artist_song", "strip_junk"):
+            rule["protect"] = protect
 
         out.append(rule)
 
@@ -171,7 +175,9 @@ class Handler(BaseHTTPRequestHandler):
                 names, shows, fileops._app_root(), bool(data.get("lookup"))
             )
 
-        return inject_tables(rules, shows, artists), report
+        protect = [w.strip() for w in re.split(r"[,\n]", data.get("protect_text") or "") if w.strip()]
+
+        return inject_tables(rules, shows, artists, protect), report
 
     # -- routes -------------------------------------------------------------
 
@@ -195,10 +201,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/start":
-            home = os.path.expanduser("~")
             self._send(200, {
                 "drives": fileops.drives(),
-                "home": home,
+                "home": fileops.preferred_start(),
+                "system_drive": fileops.SYSTEM_DRIVE,
                 "presets": PRESETS,
                 "rulesets": fileops.load_rulesets(),
                 "undo": fileops.read_undo(),
@@ -231,6 +237,17 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         data = self._body()
+
+        if parsed.path in ("/api/preview", "/api/apply"):
+            path = data.get("path", "")
+
+            if path and fileops.is_system_path(path) and not data.get("allow_system"):
+                self._send(200, {
+                    "rows": [], "summary": {"total": 0, "rename": 0, "unchanged": 0, "error": 0},
+                    "lookup": [], "done": 0, "errors": [],
+                    "system_blocked": fileops.SYSTEM_DRIVE,
+                })
+                return
 
         try:
             if parsed.path == "/api/preview":
@@ -306,7 +323,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer is running.",
+        "  Bulk Renamer v1.2 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,
