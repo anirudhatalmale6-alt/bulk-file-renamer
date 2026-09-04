@@ -60,6 +60,14 @@ The styles are:
                               uses "05of10" instead. An episode name is kept
                               when the filename has one, and placeholder
                               names like "Episode 3.05" are dropped.
+                              Files that carry an episode number but no
+                              season - "Strike-The.Silkworm-E01.mp4" - are
+                              understood too, and if the folder holds a
+                              complete run starting at 1 the count of files
+                              is the total: E01 and E02 become "1of2" and
+                              "2of2". A file that states a season is trusted
+                              over the folder, so season one of a long series
+                              stays S1E01 and is never renumbered.
 
 
   Music album:             for an album folder. Takes the artist from the
@@ -103,15 +111,32 @@ The styles are:
                            turns dots and underscores back into spaces, and
                            fixes the capitalisation.
 
-Then add more rules on top if you need them. Rules run top to bottom, each
-one working on the result of the last, and you can reorder them with the
-arrows. That is the point of the whole thing: one pass instead of several.
+Underneath the styles is the list of steps the chosen style is made of, one
+small chip each, in the order they run. Click a chip to change that step's
+settings - one settings box opens below, and only ever one. The x on a chip
+removes that step. "+ add a rule" puts a new one on the end, and it appears
+as another chip in the same row rather than another box down the page.
+
+Rules run left to right, each one working on the result of the last, and the
+arrows in the settings box move a step earlier or later. That is the point of
+the whole thing: one pass instead of several.
 
 The TV preset also removes the word "The" anywhere in a name, so
 "The Americans S01E01" becomes "Americans S1E01". Season numbers are not
 padded - S1, S2, and S10 only when a show really has ten or more seasons.
 If you ever want "The" kept, delete the "Remove the word The" rule from the
 list after clicking the preset.
+
+QUOTE MARKS
+-----------
+
+Quote marks and apostrophes are taken out of the finished name. Episode
+databases wrap some titles in them - every episode of Bodies is listed as
+'Like This' - and there is no way to tell that decoration apart from the
+apostrophe inside a word. So all of them go: "'We Are One Another's Ghosts'"
+becomes "We Are One Anothers Ghosts". Say the word if you would rather keep
+the ones inside words.
+
 
 TEXT THAT IS THE SAME IN EVERY FILE
 -----------------------------------
@@ -148,7 +173,8 @@ Every file is listed with its current name and the name it would get. Green
 means it will be renamed, grey means nothing changes, red means there is a
 problem. Nothing on your disk has been touched at this stage.
 
-Then press Rename at the bottom.
+Then press Rename at the bottom. It asks nothing and just does it - the
+preview above is the check, and Undo puts the whole batch back.
 
 
 LOOKING TV SHOWS UP
@@ -253,7 +279,7 @@ one per line or comma separated, and they are left alone everywhere.
 SAFETY
 ------
 
-Nothing is renamed until you press Rename and confirm.
+Nothing is renamed until you press Rename.
 
 What you were shown is what gets done. If anything changed between the
 preview you were looking at and the moment you pressed the button - because

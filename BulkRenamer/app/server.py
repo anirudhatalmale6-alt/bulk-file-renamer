@@ -54,6 +54,9 @@ def parse_table(text):
             try:
                 entry["episodes"] = int(count.strip())
                 entry["seasons"] = 1
+                # Typed by hand, so it outranks anything worked out from the
+                # folder or fetched online.
+                entry["user_count"] = True
             except ValueError:
                 pass
 
@@ -387,7 +390,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer v1.5 is running.",
+        "  Bulk Renamer v1.6 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,

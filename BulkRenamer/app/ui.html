@@ -72,6 +72,14 @@
   .chip.on {
     background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
   }
+  /* A rule shown as one small chip in the same row as the styles above it,
+     instead of its own tall box. Their words: "those rule boxes take up far
+     too much space". */
+  .chip.step { display: inline-flex; align-items: center; gap: 8px; }
+  .chip.step .x { font-weight: 700; opacity: .6; }
+  .chip.step .x:hover { opacity: 1; color: var(--bad); }
+  .chip.step.on .x:hover { color: #ffd7d0; }
+  .chip.add { border-style: dashed; color: var(--dim); }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
@@ -119,7 +127,7 @@
 <body>
 
 <header>
-  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.5</span></h1>
+  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.6</span></h1>
   <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
 </header>
 
@@ -182,30 +190,12 @@
       <span class="muted">Click one:</span>
       <span id="presets"></span>
     </div>
-    <div id="autoNote" class="muted" style="margin-bottom:12px"></div>
-    <div id="rules"></div>
+    <div id="autoNote" class="muted" style="margin-bottom:10px"></div>
+    <div class="row" id="steps" style="margin-bottom:8px"></div>
+    <div id="editor"></div>
    <details id="morerules">
-    <summary class="muted">Add your own rules, or load a saved set</summary>
+    <summary class="muted">Saved rule sets</summary>
     <div class="row" style="margin-top:10px">
-      <select id="addType">
-        <option value="preset_tv">TV: Showname S3E05 Title (your format)</option>
-        <option value="tag_music">Music: Artist - Song, read from the tags</option>
-        <option value="preset_artist_song">Music: Artist - Song (from the filename)</option>
-        <option value="folder_artist">Music album: Artist (from folder) - Song</option>
-        <option value="drop_the">Remove the word "The"</option>
-        <option value="preset_show_episode">TV: Showname S01E01 (plain)</option>
-        <option value="strip_junk">Strip download junk</option>
-        <option value="find_replace">Find and replace</option>
-        <option value="case_every_word">Capitalise Every Word</option>
-        <option value="case">Change capitalisation</option>
-        <option value="insert">Add prefix / suffix</option>
-        <option value="number">Add numbering</option>
-        <option value="trim">Remove characters</option>
-        <option value="ext_lower">Lowercase the extension</option>
-        <option value="set_ext">Change the extension</option>
-      </select>
-      <button id="addRule">Add rule</button>
-      <span style="flex:1"></span>
       <select id="rulesetPick"><option value="">— saved rule sets —</option></select>
       <button id="rulesetLoad">Load</button>
       <button id="rulesetSave">Save current…</button>
@@ -338,7 +328,7 @@ const FIELDS = {
 const LABELS = {
   preset_tv: "TV: Showname S3E05 Title (your format)",
   case_every_word: "Capitalise Every Word",
-  preset_artist_song: "Music: Artist - Song",
+  preset_artist_song: "Music: Artist - Song, from the filename",
   tag_music: "Music: Artist - Song, read from the tags",
   folder_artist: "Music album: Artist (from folder) - Song",
   drop_the: 'Remove the word "The"', preset_show_episode: "TV: Showname S01E01 (plain)",
@@ -356,99 +346,215 @@ function takeOver() {
   renderAutoNote(null);
 }
 
+// The order the "add a rule" list offers them in.
+const ADD_TYPES = [
+  "preset_tv", "tag_music", "preset_artist_song", "folder_artist", "drop_the",
+  "preset_show_episode", "strip_junk", "find_replace", "case_every_word",
+  "case", "insert", "number", "trim", "ext_lower", "set_ext"
+];
+
+// Which rule the single editor box is showing: null (none), an index, or "new".
+let EDITING = null;
+
+function buildFields(rule, body, onChange) {
+  (FIELDS[rule.type] || []).forEach((f) => {
+    const wrap = document.createElement("label");
+    wrap.className = "muted";
+    wrap.appendChild(document.createTextNode(f.label));
+
+    let input;
+    if (f.type === "select") {
+      input = document.createElement("select");
+      f.options.forEach(([val, txt]) => {
+        const o = document.createElement("option");
+        o.value = val; o.textContent = txt;
+        input.appendChild(o);
+      });
+      input.value = rule[f.key] !== undefined ? rule[f.key] : f.options[0][0];
+    } else if (f.type === "check") {
+      input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = rule[f.key] !== undefined ? !!rule[f.key] : !!f.def;
+    } else {
+      input = document.createElement("input");
+      input.type = f.type === "number" ? "number" : "text";
+      input.value = rule[f.key] !== undefined ? rule[f.key] : (f.def !== undefined ? f.def : "");
+      if (f.width) input.style.width = f.width + "px";
+    }
+
+    const commit = () => {
+      rule[f.key] = f.type === "check" ? input.checked
+                  : f.type === "number" ? Number(input.value)
+                  : input.value;
+      onChange();
+    };
+    input.addEventListener("change", commit);
+    if (f.type === "text") input.addEventListener("input", debounce(commit, 350));
+
+    if (f.type === "check") wrap.insertBefore(input, wrap.firstChild);
+    else wrap.appendChild(input);
+
+    body.appendChild(wrap);
+  });
+
+  if (!(FIELDS[rule.type] || []).length) {
+    const hint = document.createElement("span");
+    hint.className = "muted";
+    hint.textContent = "nothing to set for this one";
+    body.appendChild(hint);
+  }
+}
+
 function renderRules() {
-  const host = $("rules");
+  if (typeof EDITING === "number" && EDITING >= RULES.length) EDITING = null;
+  renderSteps();
+  renderEditor();
+}
+
+// Each rule is one chip, in the same row as the styles above. Clicking it opens
+// the single settings box below; the x removes it.
+function renderSteps() {
+  const host = $("steps");
   host.innerHTML = "";
 
   if (!RULES.length) {
-    host.innerHTML = '<div class="muted">No rules yet — pick a starting point above, or add one below.</div>';
-    return;
+    const hint = document.createElement("span");
+    hint.className = "muted";
+    hint.textContent = "No rules yet — pick a style above, or add one:";
+    host.appendChild(hint);
+  } else {
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = "Steps, in order:";
+    host.appendChild(label);
   }
 
   RULES.forEach((rule, i) => {
-    const box = document.createElement("div");
-    box.className = "rule";
+    const chip = document.createElement("span");
+    chip.className = "chip step" + (EDITING === i ? " on" : "");
+    chip.dataset.index = i;
 
-    const head = document.createElement("div");
-    head.className = "rule-head";
-    head.innerHTML = '<strong>' + (i + 1) + '. ' + (LABELS[rule.type] || rule.type) + '</strong>';
+    const text = document.createElement("span");
+    text.textContent = (i + 1) + ". " + (LABELS[rule.type] || rule.type);
+    text.title = "click to change its settings";
+    text.style.cursor = "pointer";
+    text.onclick = () => { EDITING = (EDITING === i ? null : i); renderRules(); };
 
-    const spacer = document.createElement("span");
-    spacer.style.flex = "1";
-    head.appendChild(spacer);
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = "remove this step";
+    x.style.cursor = "pointer";
+    x.onclick = (ev) => {
+      ev.stopPropagation();
+      RULES.splice(i, 1);
+      if (EDITING === i) EDITING = null;
+      takeOver(); renderRules(); preview();
+    };
+
+    chip.append(text, x);
+    host.appendChild(chip);
+  });
+
+  const add = document.createElement("span");
+  add.className = "chip add" + (EDITING === "new" ? " on" : "");
+  add.id = "addRule";
+  add.textContent = "+ add a rule";
+  add.style.cursor = "pointer";
+  add.onclick = () => { EDITING = (EDITING === "new" ? null : "new"); renderRules(); };
+  host.appendChild(add);
+}
+
+// One box, never a stack of them. It shows whichever step is selected, or the
+// list to pick a new one from.
+function renderEditor() {
+  const host = $("editor");
+  host.innerHTML = "";
+
+  if (EDITING === null) return;
+
+  const box = document.createElement("div");
+  box.className = "rule";
+
+  const head = document.createElement("div");
+  head.className = "rule-head";
+
+  const title = document.createElement("strong");
+  head.appendChild(title);
+
+  const spacer = document.createElement("span");
+  spacer.style.flex = "1";
+  head.appendChild(spacer);
+
+  const body = document.createElement("div");
+  body.className = "rule-body";
+
+  if (EDITING === "new") {
+    title.textContent = "Add a rule";
+
+    const pick = document.createElement("select");
+    pick.id = "addType";
+    ADD_TYPES.forEach(t => {
+      const o = document.createElement("option");
+      o.value = t; o.textContent = LABELS[t] || t;
+      pick.appendChild(o);
+    });
+
+    const add = document.createElement("button");
+    add.className = "primary";
+    add.textContent = "Add";
+    add.onclick = () => {
+      const rule = { type: pick.value };
+      (FIELDS[pick.value] || []).forEach(f => { if (f.def !== undefined) rule[f.key] = f.def; });
+      RULES.push(rule);
+      EDITING = RULES.length - 1;   // straight into its settings
+      takeOver(); renderRules(); preview();
+    };
+
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.onclick = () => { EDITING = null; renderRules(); };
+
+    body.append(pick, add, cancel);
+  } else {
+    const i = EDITING;
+    const rule = RULES[i];
+    title.textContent = (i + 1) + ". " + (LABELS[rule.type] || rule.type);
 
     [["↑", -1], ["↓", 1]].forEach(([txt, dir]) => {
       const b = document.createElement("button");
       b.textContent = txt;
+      b.title = dir < 0 ? "run this one earlier" : "run this one later";
       b.disabled = (dir < 0 && i === 0) || (dir > 0 && i === RULES.length - 1);
-      b.onclick = () => { const t = RULES[i + dir]; RULES[i + dir] = RULES[i]; RULES[i] = t; takeOver(); renderRules(); preview(); };
+      b.onclick = () => {
+        const t = RULES[i + dir]; RULES[i + dir] = RULES[i]; RULES[i] = t;
+        EDITING = i + dir;
+        takeOver(); renderRules(); preview();
+      };
       head.appendChild(b);
     });
 
     const del = document.createElement("button");
     del.textContent = "Remove";
     del.className = "danger";
-    del.onclick = () => { RULES.splice(i, 1); takeOver(); renderRules(); preview(); };
+    del.onclick = () => { RULES.splice(i, 1); EDITING = null; takeOver(); renderRules(); preview(); };
     head.appendChild(del);
 
-    box.appendChild(head);
+    const close = document.createElement("button");
+    close.textContent = "Close";
+    close.onclick = () => { EDITING = null; renderRules(); };
+    head.appendChild(close);
 
-    const body = document.createElement("div");
-    body.className = "rule-body";
-
-    (FIELDS[rule.type] || []).forEach((f) => {
-      const wrap = document.createElement("label");
-      wrap.className = "muted";
-      wrap.appendChild(document.createTextNode(f.label));
-
-      let input;
-      if (f.type === "select") {
-        input = document.createElement("select");
-        f.options.forEach(([val, txt]) => {
-          const o = document.createElement("option");
-          o.value = val; o.textContent = txt;
-          input.appendChild(o);
-        });
-        input.value = rule[f.key] !== undefined ? rule[f.key] : f.options[0][0];
-      } else if (f.type === "check") {
-        input = document.createElement("input");
-        input.type = "checkbox";
-        input.checked = rule[f.key] !== undefined ? !!rule[f.key] : !!f.def;
-      } else {
-        input = document.createElement("input");
-        input.type = f.type === "number" ? "number" : "text";
-        input.value = rule[f.key] !== undefined ? rule[f.key] : (f.def !== undefined ? f.def : "");
-        if (f.width) input.style.width = f.width + "px";
-      }
-
-      const commit = () => {
-        rule[f.key] = f.type === "check" ? input.checked
-                    : f.type === "number" ? Number(input.value)
-                    : input.value;
-        // Editing a rule by hand means the automatic choice is no longer
-        // wanted - otherwise the next preview would quietly undo the edit.
-        takeOver();
-        preview();
-      };
-      input.addEventListener("change", commit);
-      if (f.type === "text") input.addEventListener("input", debounce(commit, 350));
-
-      if (f.type === "check") wrap.insertBefore(input, wrap.firstChild);
-      else wrap.appendChild(input);
-
-      body.appendChild(wrap);
+    buildFields(rule, body, () => {
+      // Editing a rule by hand means the automatic choice is no longer
+      // wanted - otherwise the next preview would quietly undo the edit.
+      takeOver();
+      preview();
     });
+  }
 
-    if (!(FIELDS[rule.type] || []).length) {
-      const hint = document.createElement("span");
-      hint.className = "muted";
-      hint.textContent = "nothing to configure";
-      body.appendChild(hint);
-    }
-
-    box.appendChild(body);
-    host.appendChild(box);
-  });
+  box.append(head, body);
+  host.appendChild(box);
 }
 
 function payload() {
@@ -754,8 +860,8 @@ $("apply").onclick = async () => {
     return;
   }
 
-  if (!confirm("Rename " + n + " file" + (n === 1 ? "" : "s") + "?\n\nYou can undo this straight afterwards.")) return;
-
+  // No "are you sure?" box - their request. It was never much of a safeguard
+  // anyway: the preview above is the check, and Undo puts a whole batch back.
   $("apply").disabled = true;
   try {
     const chosen = pickedRows().map(r => r.old_path);
@@ -819,16 +925,6 @@ $("showsText").addEventListener("change", () => preview());
 $("artistsText").addEventListener("change", () => preview());
 $("protectText").addEventListener("change", () => preview());
 $("addTitles").addEventListener("change", () => preview());
-
-$("addRule").onclick = () => {
-  const type = $("addType").value;
-  const rule = { type: type };
-  (FIELDS[type] || []).forEach(f => { if (f.def !== undefined) rule[f.key] = f.def; });
-  RULES.push(rule);
-  takeOver();
-  renderRules();
-  preview();
-};
 
 // ---------------------------------------------------------------- rulesets
 function renderRulesets() {

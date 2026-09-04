@@ -85,6 +85,15 @@ _EPISODE_PATTERNS = [
     re.compile(r"\bseason\s*(?P<season>\d{1,2})\s*(?:,|-|\s)*\s*episode\s*(?P<episode>\d{1,3})\b", re.I),
 ]
 
+# An episode number with NO season: "-E01", "Ep 3", "Episode 12". The client's
+# "Strike-The.Silkworm-E01.mp4" is this shape, and before v1.6 it matched
+# nothing at all - so the episode number was treated as junk and thrown away,
+# which silently gave two different episodes the same name. The season is
+# reported as None rather than 1, because "the file does not say" and "the file
+# says season one" lead to different numbering (see infer_episode_total).
+_EPISODE_NO_SEASON = re.compile(
+    r"(?:^|[\s._\-\[\(])e(?:p|pisode)?[\s._-]*(?P<episode>\d{1,3})(?=$|[\s._\-\]\)])", re.I)
+
 # A bare 3-4 digit code like "102" = season 1 episode 02. Only trusted when it
 # stands alone as a word, otherwise every resolution and year matches.
 _BARE_EPISODE = re.compile(r"\b(?P<season>[1-9])(?P<episode>\d{2})\b")
@@ -113,6 +122,21 @@ _SMART_QUOTES = {"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
 def straighten_quotes(text):
     for curly, plain in _SMART_QUOTES.items():
         text = text.replace(curly, plain)
+
+    return text
+
+
+def drop_quotes(text):
+    """Take quote marks out of a finished name.
+
+    The client: "Bodies 5of8 'We Are One Another's Ghosts'.mkv - note the '
+    characters which i dont need". Those wrapping quotes come from the episode
+    database, which writes every Bodies title as 'Like This'. Rather than guess
+    which of the three apostrophes in that name was decoration and which was
+    part of a word, all of them go - so "Another's" becomes "Anothers".
+    """
+    for char in "'\"" + "‘’‚‛“”„‟´ʼ":
+        text = text.replace(char, "")
 
     return text
 
@@ -161,6 +185,13 @@ def _collapse(text):
     """Squeeze runs of whitespace and tidy spacing around punctuation."""
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\s*-\s*-\s*", " - ", text)
+
+    # A dash with a space on one side only is a leftover from something removed
+    # next to it: "Strike-The Silkworm" minus "The" leaves "Strike- Silkworm".
+    # Give it space on both sides. A dash with no space either side is part of
+    # the word ("Spider-Man", "AC-DC", "x264-GalaxyTV") and is left alone.
+    text = re.sub(r"(?<=\S)-[ \t]+", " - ", text)
+    text = re.sub(r"[ \t]+-(?=\S)", " - ", text)
     text = re.sub(r"\(\s*\)|\[\s*\]|\{\s*\}", "", text)
     text = re.sub(r"\s+([,.!?])", r"\1", text)
 
@@ -427,6 +458,8 @@ def title_words(text, fixes=None, trust_case=False):
 def find_episode_span(text):
     """Return (before, season, episode, after) or None.
 
+    season is None when the filename gives an episode number but no season.
+
     The text after the code matters: that is where an episode title lives when
     the filename carries one, as in "... S01E05 Crossroads 1080p ...".
     """
@@ -440,6 +473,15 @@ def find_episode_span(text):
                 int(match.group("episode")),
                 text[match.end():],
             )
+
+    match = _EPISODE_NO_SEASON.search(text)
+
+    if match:
+        # match.start() sits on the separator in front of the "E", which belongs
+        # to neither side: "Strike-The.Silkworm-E01" gives a show of
+        # "Strike-The.Silkworm" and an empty title.
+        return (text[: match.start()], None, int(match.group("episode")),
+                text[match.end():])
 
     cleaned = strip_junk(text)
 
@@ -468,6 +510,13 @@ def find_episode(text):
                 int(match.group("season")),
                 int(match.group("episode")),
             )
+
+    match = _EPISODE_NO_SEASON.search(text)
+
+    if match:
+        # This preset always prints a season, so a file that names none is
+        # season one - which is what "E01" means everywhere it is used.
+        return (text[: match.start()], 1, int(match.group("episode")))
 
     # Bare codes only after the obvious noise is gone, and never a year.
     cleaned = strip_junk(text)
@@ -572,6 +621,52 @@ def lookup_show(text, shows):
     return best[1] if best else None
 
 
+def infer_episode_total(stems):
+    """How many episodes a batch holds, when the batch itself is the evidence.
+
+    The client's case: two files called "...-E01" and "...-E02" should come out
+    "1of2" and "2of2". Nothing in either filename says how many episodes there
+    are - but the folder does, if it holds a complete run.
+
+    Deliberately strict, because guessing this wrong renumbers a whole series:
+
+      * every file that carries an episode number must carry NO season. A file
+        that says S01 is stating its own structure, and that is trusted over a
+        count of files in a folder - a folder holding season 1 of a long series
+        must stay S1E01, not become "01of10".
+      * the numbers must be a complete run from 1 with no gaps or repeats.
+        Episodes 3 to 6 are part of something bigger, so "3of4" would be a lie.
+      * they must all belong to the same show.
+      * fewer than 20, which is the client's own threshold for this format.
+
+    Returns the count, or None when any of that fails.
+    """
+    numbers = []
+    shows = set()
+
+    for stem in stems:
+        found = find_episode_span(stem)
+
+        if not found:
+            continue        # artwork, subtitles, a stray nfo - not evidence
+
+        before, season, episode, _after = found
+
+        if season is not None:
+            return None
+
+        numbers.append(episode)
+        shows.add(_normalise_separators(strip_junk(before, drop_year=True)).strip().lower())
+
+    if len(shows) != 1 or not 2 <= len(numbers) < 20:
+        return None
+
+    if sorted(numbers) != list(range(1, len(numbers) + 1)):
+        return None
+
+    return len(numbers)
+
+
 def episode_code(season, episode, total=None, seasons=None):
     """The client's two formats.
 
@@ -593,8 +688,13 @@ def episode_code(season, episode, total=None, seasons=None):
     return "S{}E{:02d}".format(season if season else 1, episode)
 
 
-def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False, common=None):
-    """Showname + episode code + episode title, to the client's spec."""
+def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False, common=None,
+              batch_total=None):
+    """Showname + episode code + episode title, to the client's spec.
+
+    batch_total: an episode count worked out from the folder itself, used only
+    when the filenames carry no season (see infer_episode_total).
+    """
     found = find_episode_span(stem)
 
     if not found:
@@ -613,6 +713,13 @@ def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False, comm
         total = entry.get("episodes")
         seasons = entry.get("seasons")
 
+        # A count the user typed themselves always wins. A looked-up one does
+        # not, when the filenames name no season and the folder holds a complete
+        # run: the lookup would report every episode the series ever had, which
+        # turns a two-part story into S1E01 instead of the 1of2 they asked for.
+        if batch_total and not entry.get("user_count"):
+            total, seasons = batch_total, 1
+
         # A titles map, if one was supplied or looked up. Only consulted when
         # the user asks for episode names to be added: their "Secret Invasion
         # 3of6" example deliberately carries no title, while an earlier
@@ -623,6 +730,8 @@ def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False, comm
             known_title = titles.get("{}x{}".format(season, episode), "") or ""
     else:
         show = title_words(strip_junk(before, drop_year=True, protect=protect), fixes)
+        total = batch_total
+        seasons = 1 if batch_total else None
 
     # An episode title, when the filename actually carries one. Anything the
     # whole batch shares at the end of the name is release clutter, not a title -
@@ -837,7 +946,8 @@ def apply_rules(stem, ext, rules, index=0, context=None, filename=None):
 
         if kind == "preset_tv":
             stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"), rule.get("protect"),
-                             bool(rule.get("add_titles")), common)
+                             bool(rule.get("add_titles")), common,
+                             context.get("episode_total"))
         elif kind == "preset_artist_song":
             stem = preset_artist_song(stem, rule.get("artists"), rule.get("fixes"), rule.get("protect"))
         elif kind == "tag_music":
@@ -884,6 +994,12 @@ def apply_rules(stem, ext, rules, index=0, context=None, filename=None):
                 ext = new if new.startswith(".") else "." + new
 
         stem = stem.strip()
+
+    # Last of all, and once only: quote marks are not wanted in a filename.
+    # Only when something actually ran - with no rules at all the tool must
+    # leave every name exactly as it found it.
+    if rules:
+        stem = _collapse(drop_quotes(stem))
 
     return stem, ext
 
@@ -942,8 +1058,13 @@ def plan(filenames, rules, existing=None, context=None):
 
     # The app passes this in so it can also show the user what it found; when
     # the engine is used directly it works it out itself.
+    stems = [split_name(f)[0] for f in filenames]
+
     if context.get("common") is None:
-        context["common"] = common_tail_words([split_name(f)[0] for f in filenames])
+        context["common"] = common_tail_words(stems)
+
+    if context.get("episode_total") is None:
+        context["episode_total"] = infer_episode_total(stems)
 
     # Pass one: work out what each file wants to be called. Collisions cannot be
     # judged yet, because a name may be freed up by a file later in the list -
