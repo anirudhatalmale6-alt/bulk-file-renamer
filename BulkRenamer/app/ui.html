@@ -86,18 +86,23 @@
   .pill.error { color: var(--bad); border-color: #e6c3bd; background: #fdeeec; }
   .summary { display: flex; gap: 16px; margin: 10px 0; flex-wrap: wrap; }
   .summary b { font-size: 18px; display: block; }
-  .modal {
-    position: fixed; inset: 0; background: rgba(25,28,32,.45); display: none;
-    align-items: center; justify-content: center; z-index: 20; padding: 20px;
+  .tree {
+    margin-top: 10px; max-height: 260px; overflow: auto;
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+    background: var(--soft); font-size: 13px;
   }
-  .modal.open { display: flex; }
-  .modal-box {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    width: min(720px, 100%); max-height: 80vh; display: flex; flex-direction: column;
+  .tnode { display: flex; align-items: center; gap: 4px; padding: 1px 0; }
+  .twist {
+    width: 16px; text-align: center; cursor: pointer; color: var(--dim);
+    user-select: none; flex: 0 0 16px;
   }
-  .modal-box header { border-radius: 8px 8px 0 0; }
-  .modal-body { overflow: auto; padding: 12px 16px; }
-  .dirlist button { display: block; width: 100%; text-align: left; margin-bottom: 4px; background: var(--soft); }
+  .twist.empty { visibility: hidden; }
+  .tname {
+    cursor: pointer; padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+  }
+  .tname:hover { background: #e8eef8; }
+  .tname.selected { background: var(--accent); color: #fff; }
+  .tkids { margin-left: 14px; border-left: 1px dotted var(--line); padding-left: 6px; }
   .note { border-left: 3px solid var(--warn); padding: 8px 12px; background: #fdf6e6; border-radius: 4px; }
   .err { border-left: 3px solid var(--bad); padding: 8px 12px; background: #fdeeec; border-radius: 4px; }
   .ok { border-left: 3px solid var(--ok); padding: 8px 12px; background: #eef8f2; border-radius: 4px; }
@@ -111,7 +116,7 @@
 <body>
 
 <header>
-  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.3</span></h1>
+  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.4</span></h1>
   <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
 </header>
 
@@ -119,10 +124,10 @@
   <section>
     <h2>1 &nbsp;Folder</h2>
     <div class="row">
-      <input type="text" id="path" class="grow" placeholder="C:\Users\you\Downloads" />
-      <button id="browse">Browse…</button>
+      <input type="text" id="path" class="grow" placeholder="E:\download" />
       <label><input type="checkbox" id="recursive" /> include sub-folders</label>
     </div>
+    <div id="tree" class="tree"></div>
     <div class="row" style="margin-top:10px">
       <label class="muted">only these types
         <input type="text" id="exts" placeholder="mkv, mp4, mp3  (blank = all)" style="width:250px" />
@@ -131,34 +136,40 @@
   </section>
 
   <section>
-   <details id="advanced">
-    <summary><h2 style="display:inline">Names the filename cannot tell me — open only if something comes out wrong</h2></summary>
-    <p class="muted" style="margin-top:-4px">
-      An episode title that is not in the filename, how many episodes a series has, or where an
-      artist's name ends and the song begins — none of that is in the text, so it has to come
-      from here.
-    </p>
-    <div class="row" style="align-items:flex-start">
-      <div style="flex:1 1 340px">
-        <label class="muted" for="showsText">Show names — one per line, <code>found in filename = what you want</code>,
-          optionally <code>| number of episodes</code></label>
-        <textarea id="showsText" rows="5" placeholder="Le Bureau Des Legendes = Bureau&#10;The Americans = A - Americans&#10;Band of Brothers = Band Of Brothers | 10"></textarea>
-      </div>
-      <div style="flex:1 1 340px">
-        <label class="muted" for="artistsText">Artists — one per line, so the tool knows where the artist ends</label>
-        <textarea id="artistsText" rows="5" placeholder="brian kennedy = Brian Kennedy&#10;daft punk = Daft Punk"></textarea>
-      </div>
+    <div class="row">
+      <label><input type="checkbox" id="lookup" checked /> <strong>Look TV shows up online</strong></label>
+      <span class="muted">Needed for the 3of6 style — a filename never says how many episodes a series has. Uncheck it and nothing leaves your PC.</span>
     </div>
-    <div class="row" style="margin-top:10px">
-      <label class="muted" for="protectText" style="display:block">Never remove these words — one per line or comma separated.
-        Use it when a performer or band name collides with a tag (someone called Cam, Eve, Summer…)</label>
-      <textarea id="protectText" rows="2" placeholder="cam, eve, summer"></textarea>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <label><input type="checkbox" id="lookup" /> Look episode titles and counts up online (TVmaze)</label>
-      <span class="muted">Off by default. When off, nothing leaves your PC. Results are cached, so a second run needs no connection.</span>
+    <div class="row" style="margin-top:6px">
+      <label><input type="checkbox" id="addTitles" /> Also add the episode name when it is known</label>
+      <span class="muted">"Secret Invasion 3of6" becomes "Secret Invasion 3of6 Betrayed".</span>
     </div>
     <div id="lookupReport" class="muted" style="margin-top:8px"></div>
+
+   <details id="advanced" style="margin-top:10px">
+    <summary class="muted">If a name comes out wrong, fix it here</summary>
+
+    <div style="margin-top:10px">
+      <label class="muted" for="showsText"><strong>Call a show something else.</strong>
+        One per line. Left side is what appears in the filename, right side is the name you want.
+        Add <code>| 6</code> if you know the episode count and don't want to look it up.</label>
+      <textarea id="showsText" rows="3" placeholder="Le Bureau Des Legendes = Bureau&#10;Secret Invasion = Secret Invasion | 6"></textarea>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="muted" for="artistsText"><strong>Where an artist's name ends.</strong>
+        Only needed for music files with no dash, like <code>brian.kennedy.you.raise.me.up</code> —
+        without this the tool cannot tell the artist from the song.</label>
+      <textarea id="artistsText" rows="2" placeholder="brian kennedy = Brian Kennedy"></textarea>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="muted" for="protectText"><strong>Words the cleaner should not delete.</strong>
+        It strips tags like <code>cam</code>, <code>web</code>, <code>sub</code> and <code>eng</code>.
+        If a performer or band is actually called that, their name would vanish — put it here and it stays.
+        Leave empty unless you hit it.</label>
+      <textarea id="protectText" rows="2" placeholder="cam, eve, summer"></textarea>
+    </div>
    </details>
   </section>
 
@@ -220,22 +231,6 @@
   <span class="muted" id="undoInfo"></span>
 </footer>
 
-<div class="modal" id="picker">
-  <div class="modal-box">
-    <header><h1 style="font-size:15px">Choose a folder</h1><span class="sub" id="pickerPath"></span></header>
-    <div class="modal-body">
-      <div class="row" style="margin-bottom:10px">
-        <button id="pickUp">↑ Up one level</button>
-        <span id="driveList"></span>
-      </div>
-      <div class="dirlist" id="dirs"></div>
-    </div>
-    <div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:10px">
-      <button class="primary" id="pickUse">Use this folder</button>
-      <button id="pickClose">Cancel</button>
-    </div>
-  </div>
-</div>
 
 <script>
 const TOKEN = "__TOKEN__";
@@ -244,7 +239,6 @@ let LAST = { rows: [], summary: null };
 let PRESETS = [];
 let RULESETS = {};
 let SEP = "\\";
-let pickerPath = "";
 let SYSTEM_DRIVE = "C:";
 let allowSystem = false;
 let PICKED = null;   // null = everything that can be renamed; otherwise a Set of paths
@@ -443,6 +437,7 @@ function payload() {
     artists_text: $("artistsText").value,
     protect_text: $("protectText").value,
     lookup: $("lookup").checked,
+    add_titles: $("addTitles").checked,
     allow_system: allowSystem
   };
 }
@@ -698,6 +693,7 @@ $("lookup").addEventListener("change", () => preview());
 $("showsText").addEventListener("change", () => preview());
 $("artistsText").addEventListener("change", () => preview());
 $("protectText").addEventListener("change", () => preview());
+$("addTitles").addEventListener("change", () => preview());
 
 $("addRule").onclick = () => {
   const type = $("addType").value;
@@ -744,34 +740,91 @@ $("rulesetDelete").onclick = async () => {
   RULESETS = res.rulesets; renderRulesets();
 };
 
-// ---------------------------------------------------------------- picker
-async function openPicker(path) {
-  try {
-    const data = await api("/api/browse?path=" + encodeURIComponent(path));
-    pickerPath = data.path;
-    $("pickerPath").textContent = data.path;
-    $("pickUp").disabled = !data.parent;
-    $("pickUp").onclick = () => openPicker(data.parent);
-    const host = $("dirs");
-    host.innerHTML = "";
-    if (!data.dirs.length) host.innerHTML = '<div class="muted">No sub-folders here.</div>';
-    data.dirs.forEach(d => {
-      const b = document.createElement("button");
-      b.textContent = "📁  " + d.name;
-      b.onclick = () => openPicker(d.path);
-      host.appendChild(b);
-    });
-    $("picker").classList.add("open");
-  } catch (e) { note("err", e.message); }
+// ------------------------------------------------------------------ tree
+// A folder tree, lazily loaded. Clicking a folder selects it straight away -
+// there is no "use this folder" step, because wanting to look inside a folder
+// and wanting to work on it are the same thing here.
+
+async function loadDirs(path) {
+  const data = await api("/api/browse?path=" + encodeURIComponent(path));
+  return data.dirs || [];
 }
 
-$("browse").onclick = () => openPicker($("path").value.trim() || undefined);
-$("pickClose").onclick = () => $("picker").classList.remove("open");
-$("pickUse").onclick = () => {
-  $("path").value = pickerPath;
-  $("picker").classList.remove("open");
+function selectFolder(path, nameEl) {
+  document.querySelectorAll(".tname.selected").forEach(e => e.classList.remove("selected"));
+  if (nameEl) nameEl.classList.add("selected");
+  $("path").value = path;
   preview();
-};
+}
+
+function makeNode(entry, depth) {
+  const wrap = document.createElement("div");
+
+  const row = document.createElement("div");
+  row.className = "tnode";
+
+  const twist = document.createElement("span");
+  twist.className = "twist";
+  twist.textContent = "\u25B8";
+
+  const name = document.createElement("span");
+  name.className = "tname";
+  name.textContent = (entry.system ? "\uD83D\uDDA5 " : "\uD83D\uDCC1 ") + entry.name +
+    (entry.system ? "  (system)" : "");
+  if (entry.system) name.style.opacity = "0.7";
+
+  const kids = document.createElement("div");
+  kids.className = "tkids";
+  kids.style.display = "none";
+
+  let loaded = false;
+
+  async function expand() {
+    if (!loaded) {
+      loaded = true;
+      twist.textContent = "\u2026";
+      try {
+        const dirs = await loadDirs(entry.path);
+        kids.innerHTML = "";
+        if (!dirs.length) {
+          twist.className = "twist empty";
+        } else {
+          dirs.forEach(d => kids.appendChild(makeNode(d, depth + 1)));
+        }
+      } catch (e) {
+        kids.innerHTML = '<div class="muted">cannot open this folder</div>';
+      }
+    }
+    kids.style.display = "";
+    if (twist.className === "twist") twist.textContent = "\u25BE";
+  }
+
+  function collapse() {
+    kids.style.display = "none";
+    if (twist.className === "twist") twist.textContent = "\u25B8";
+  }
+
+  twist.onclick = (ev) => {
+    ev.stopPropagation();
+    if (kids.style.display === "none") expand(); else collapse();
+  };
+
+  name.onclick = () => {
+    selectFolder(entry.path, name);   // select immediately...
+    expand();                          // ...and show what is inside
+  };
+
+  row.append(twist, name);
+  wrap.append(row, kids);
+
+  return wrap;
+}
+
+function buildTree(drives) {
+  const host = $("tree");
+  host.innerHTML = "";
+  drives.forEach(d => host.appendChild(makeNode(d, 0)));
+}
 
 // ---------------------------------------------------------------- start
 (async function start() {
@@ -790,18 +843,7 @@ $("pickUse").onclick = () => {
     });
 
     SYSTEM_DRIVE = data.system_drive || "C:";
-
-    const drives = $("driveList");
-    data.drives.forEach(d => {
-      const b = document.createElement("button");
-      b.textContent = d.system ? d.name + "  (system)" : d.name;
-      if (d.system) {
-        b.title = "Skipped by default — you will be asked before anything here is renamed";
-        b.style.opacity = "0.65";
-      }
-      b.onclick = () => openPicker(d.path);
-      drives.appendChild(b);
-    });
+    buildTree(data.drives);
 
     $("path").value = data.home;
     renderRules();

@@ -63,7 +63,7 @@ def parse_table(text):
     return out
 
 
-def inject_tables(rules, shows, artists, protect=None):
+def inject_tables(rules, shows, artists, protect=None, add_titles=False):
     """Give the table-driven rules their data. The engine stays offline."""
     out = []
 
@@ -72,6 +72,7 @@ def inject_tables(rules, shows, artists, protect=None):
 
         if rule.get("type") == "preset_tv":
             rule["shows"] = shows
+            rule["add_titles"] = add_titles
         elif rule.get("type") == "preset_artist_song":
             rule["artists"] = artists
 
@@ -182,7 +183,8 @@ class Handler(BaseHTTPRequestHandler):
 
         protect = [w.strip() for w in re.split(r"[,\n]", data.get("protect_text") or "") if w.strip()]
 
-        return inject_tables(rules, shows, artists, protect), report
+        return inject_tables(rules, shows, artists, protect,
+                             bool(data.get("add_titles"))), report
 
     # -- routes -------------------------------------------------------------
 
@@ -328,7 +330,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer v1.3 is running.",
+        "  Bulk Renamer v1.4 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,

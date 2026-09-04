@@ -30,7 +30,9 @@ USING IT
 --------
 
 STEP 1 - pick a folder.
-Type or paste the path, or press Browse. Tick "include sub-folders" to work
+Use the tree. Click the little arrow to open a folder, click its name to work
+on it - one click, there is no second "use this folder" step. You can still
+type or paste a path in the box instead. Tick "include sub-folders" to work
 through everything underneath as well. The "only these types" box limits it
 to certain files - type mkv, mp4, mp3 and it will leave everything else alone.
 
@@ -89,8 +91,25 @@ problem. Nothing on your disk has been touched at this stage.
 Then press Rename at the bottom.
 
 
-THINGS THE FILENAME CANNOT TELL ME
----------------------------------
+LOOKING TV SHOWS UP
+-------------------
+
+"Look TV shows up online" is ON. It has to be, for the numbering to work: a
+filename never says how many episodes a series has, and "3of6" cannot be
+worked out without knowing there are six. It asks TVmaze, a free TV database,
+and shows you underneath which series it matched and in what year - worth a
+glance, because two shows can share a name.
+
+Turn it off and nothing leaves your PC; you then get S1E03 instead of 3of6
+unless you type the episode count in yourself.
+
+"Also add the episode name when it is known" is OFF. Turn it on and
+"Secret Invasion 3of6" becomes "Secret Invasion 3of6 Betrayed". An episode
+name already written into the filename is kept either way.
+
+
+IF A NAME COMES OUT WRONG
+-------------------------
 
 Some of what you asked for is simply not in the text of the filename, and no
 tool can invent it:

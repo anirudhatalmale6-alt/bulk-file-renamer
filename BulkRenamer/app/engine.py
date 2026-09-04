@@ -102,6 +102,20 @@ _LEADING_TRACK = re.compile(r"^\s*[\(\[]?\s*(\d{1,3})\s*[\)\]]?\s*[-._)\]]*\s+")
 # The various dashes people and websites use between artist and title.
 _DASHES = "‐‑‒–—―⁃−"
 
+# Curly quotes, which arrive from episode databases and block plain matching.
+# Single curly quotes become a plain apostrophe, which is legal in a Windows
+# filename. Double ones are DROPPED, not converted: '"' is one of the characters
+# Windows forbids, so converting would turn a good title into a rejected name.
+_SMART_QUOTES = {"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+                 "\u201c": "", "\u201d": "", "\u201e": "", "\u201f": ""}
+
+
+def straighten_quotes(text):
+    for curly, plain in _SMART_QUOTES.items():
+        text = text.replace(curly, plain)
+
+    return text
+
 
 # Only these are treated as extensions. os.path.splitext() alone is wrong for
 # dot-separated names: it turns "brian.kennedy.you.raise.me.up" into a stem of
@@ -258,6 +272,7 @@ def title_words(text, fixes=None):
     Brothers" would never become "Band Of Brothers".
     """
     fixes = dict(DEFAULT_WORD_FIXES, **(fixes or {}))
+    text = straighten_quotes(text)
     out = []
 
     for word in text.split(" "):
@@ -275,7 +290,10 @@ def title_words(text, fixes=None):
             continue
 
         # Capitalise after an opening bracket or dash too: "(live)" -> "(Live)"
-        out.append(re.sub(r"(^|[\(\[\{'-])([a-zA-Z])",
+        # Capitalise the first letter, looking past an opening quote or
+        # bracket, and after a dash - but NOT after an apostrophe, or "you're"
+        # would become "You'Re".
+        out.append(re.sub(r"(^[\"']?|[\(\[\{-])([a-zA-Z])",
                           lambda m: m.group(1) + m.group(2).upper(),
                           word.lower()))
 
@@ -442,12 +460,16 @@ def episode_code(season, episode, total=None, seasons=None):
     single_season = (seasons is None and (season is None or season <= 1)) or seasons == 1
 
     if total and total < 20 and single_season:
-        return "{:02d}of{:02d}".format(episode, total)
+        # Pad the episode to the width of the total, which is what the client's
+        # own examples do: 6 episodes gives "3of6", 10 gives "03of10".
+        width = len(str(total))
+
+        return "{}of{}".format(str(episode).zfill(width), total)
 
     return "S{}E{:02d}".format(season if season else 1, episode)
 
 
-def preset_tv(stem, shows=None, fixes=None, protect=None):
+def preset_tv(stem, shows=None, fixes=None, protect=None, add_titles=False):
     """Showname + episode code + episode title, to the client's spec."""
     found = find_episode_span(stem)
 
@@ -467,9 +489,14 @@ def preset_tv(stem, shows=None, fixes=None, protect=None):
         total = entry.get("episodes")
         seasons = entry.get("seasons")
 
-        # A titles map, if one was supplied or looked up.
-        titles = entry.get("titles") or {}
-        known_title = titles.get("{}x{}".format(season, episode), "") or ""
+        # A titles map, if one was supplied or looked up. Only consulted when
+        # the user asks for episode names to be added: their "Secret Invasion
+        # 3of6" example deliberately carries no title, while an earlier
+        # "... S2E01 Comrades" example wanted one. It is a preference, not a
+        # fact about the file, so it is a switch.
+        if add_titles:
+            titles = entry.get("titles") or {}
+            known_title = titles.get("{}x{}".format(season, episode), "") or ""
     else:
         show = title_words(strip_junk(before, drop_year=True, protect=protect), fixes)
 
@@ -644,7 +671,8 @@ def apply_rules(stem, ext, rules, index=0, context=None):
         kind = rule.get("type")
 
         if kind == "preset_tv":
-            stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"), rule.get("protect"))
+            stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"), rule.get("protect"),
+                             bool(rule.get("add_titles")))
         elif kind == "preset_artist_song":
             stem = preset_artist_song(stem, rule.get("artists"), rule.get("fixes"), rule.get("protect"))
         elif kind == "preset_show_episode":
