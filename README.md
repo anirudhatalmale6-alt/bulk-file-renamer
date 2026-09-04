@@ -26,6 +26,7 @@ Presets for the common shapes:
 
 | Preset | Example |
 | --- | --- |
+| TV: Showname S3E05 Title | `The Americans 2013 S02E01 HDTV XviD-FUM` → `A - Americans S2E01 Comrades` |
 | Music: Artist - Song | `01 - Radiohead - Karma Police.mp3` → `Radiohead - Karma Police.mp3` |
 | TV: Showname S01E01 | `The.Bear.S03E07.1080p.WEB-DL.x265.mkv` → `The Bear S03E07.mkv` |
 | Film: Title (Year) | `Dune.Part.Two.2024.2160p.WEB-DL.mkv` → `Dune Part Two (2024).mkv` |
@@ -33,6 +34,24 @@ Presets for the common shapes:
 
 The TV preset understands `S03E07`, `3x07`, `Season 3 Episode 7` and bare codes
 like `307`, and it will not mistake a year for an episode number.
+
+## What a filename cannot tell you
+
+An episode title that isn't in the text, how many episodes a series has, a
+personal shorthand (`Le Bureau Des Legendes` → `Bureau`), or where an artist's
+name ends in `brian.kennedy.you.raise.me.up` — none of that is derivable. Two
+alias boxes supply it:
+
+```
+Le Bureau Des Legendes = Bureau
+Band of Brothers = Band Of Brothers | 10
+```
+
+Optionally — off by default — it will ask [TVmaze](https://www.tvmaze.com) for
+episode titles, episode counts and season counts, which is what makes
+`Comrades` and `05of10` appear on their own. Answers are cached, the matched
+series and its year are shown so a wrong match is visible, and a name you set
+yourself is never overruled by a lookup. With it off, nothing leaves the machine.
 
 ## Safety
 

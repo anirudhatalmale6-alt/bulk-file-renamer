@@ -20,11 +20,71 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import engine  # noqa: E402
 import fileops  # noqa: E402
+import lookup  # noqa: E402
 
 TOKEN = secrets.token_urlsafe(24)
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+def parse_table(text):
+    """Parse the alias box.
+
+    One per line:   Le Bureau Des Legendes = Bureau
+    With a count:   Band of Brothers = Band Of Brothers | 10
+    """
+    out = []
+
+    for line in (text or "").splitlines():
+        line = line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        if "=" in line:
+            left, right = line.split("=", 1)
+        else:
+            left, right = line, line
+
+        entry = {"match": left.strip(), "name": right.strip()}
+
+        if "|" in entry["name"]:
+            name, count = entry["name"].rsplit("|", 1)
+            entry["name"] = name.strip()
+
+            try:
+                entry["episodes"] = int(count.strip())
+                entry["seasons"] = 1
+            except ValueError:
+                pass
+
+        if entry["match"]:
+            out.append(entry)
+
+    return out
+
+
+def inject_tables(rules, shows, artists):
+    """Give the table-driven rules their data. The engine stays offline."""
+    out = []
+
+    for rule in rules or []:
+        rule = dict(rule)
+
+        if rule.get("type") == "preset_tv":
+            rule["shows"] = shows
+        elif rule.get("type") == "preset_artist_song":
+            rule["artists"] = artists
+
+        out.append(rule)
+
+    return out
+
+
 PRESETS = [
+    {
+        "id": "tv_client",
+        "label": "TV:  Showname S3E05 Title (your format)",
+        "rules": [{"type": "preset_tv"}],
+    },
     {
         "id": "artist_song",
         "label": "Music:  Artist - Song",
@@ -32,7 +92,7 @@ PRESETS = [
     },
     {
         "id": "show_episode",
-        "label": "TV:  Showname S01E01",
+        "label": "TV:  Showname S01E01 (plain)",
         "rules": [{"type": "preset_show_episode"}],
     },
     {
@@ -87,6 +147,31 @@ class Handler(BaseHTTPRequestHandler):
             return json.loads(self.rfile.read(length).decode("utf-8"))
         except ValueError:
             return {}
+
+    def _prepare(self, data):
+        """Resolve alias tables and any lookup, then hand the rules over."""
+        shows = parse_table(data.get("shows_text"))
+        artists = parse_table(data.get("artists_text"))
+        report = []
+
+        rules = data.get("rules") or []
+        needs_shows = any(r.get("type") == "preset_tv" for r in rules)
+
+        if needs_shows:
+            try:
+                names = [os.path.basename(f) for f in fileops.list_folder(
+                    data.get("path", ""),
+                    bool(data.get("recursive")),
+                    data.get("extensions") or None,
+                )]
+            except ValueError:
+                names = []
+
+            shows, report = lookup.resolve(
+                names, shows, fileops._app_root(), bool(data.get("lookup"))
+            )
+
+        return inject_tables(rules, shows, artists), report
 
     # -- routes -------------------------------------------------------------
 
@@ -149,19 +234,22 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path == "/api/preview":
+                rules, report = self._prepare(data)
                 rows = fileops.plan_folder(
                     data.get("path", ""),
-                    data.get("rules") or [],
+                    rules,
                     bool(data.get("recursive")),
                     data.get("extensions") or None,
                 )
-                self._send(200, {"rows": rows, "summary": engine.summarise(rows)})
+                self._send(200, {"rows": rows, "summary": engine.summarise(rows),
+                                 "lookup": report})
                 return
 
             if parsed.path == "/api/apply":
+                rules, report = self._prepare(data)
                 rows = fileops.plan_folder(
                     data.get("path", ""),
-                    data.get("rules") or [],
+                    rules,
                     bool(data.get("recursive")),
                     data.get("extensions") or None,
                 )

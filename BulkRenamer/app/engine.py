@@ -43,9 +43,35 @@ JUNK_TOKENS = [
     "multi", "dual", "dubbed", "subbed", "sub", "ita", "eng", "nordic",
     "yify", "yts", "rarbg", "sparks", "evo", "fgt", "ntb", "cmrg", "galaxyrg",
     "amzn", "nf", "dsnp", "hmax", "atvp", "hulu",
-    "official", "video", "audio", "lyrics", "lyric", "hq", "hd", "4k",
+    "official", "video", "lyrics", "lyric", "hq", "hd", "4k",
     "full", "album", "remastered", "remaster",
+    "xxx", "kitsune", "fum", "lol", "eztv", "ettv", "ddp2", "ddp",
+    "h", "264", "265", "mp4", "mkv", "avi", "m4v", "wmv", "mpg",
 ]
+
+# Phrases removed as a unit, before single tokens. "with Audio Description"
+# must go whole: stripping the token "audio" on its own leaves "with Description"
+# stranded in the middle of the title.
+JUNK_PHRASES = [
+    "with audio description", "audio description",
+    "with commentary", "directors cut", "director's cut",
+    "extended edition", "special edition",
+]
+
+# Audio and codec notation whose internal dot has already become a space:
+# "DDP5.1" -> "DDP5 1", "H.264" -> "H 264". Removing the tokens one at a time
+# leaves a stray "0" or "1" sitting in the middle of the title.
+_CODEC_NOTATION = re.compile(
+    r"(?<![a-z0-9])(?:ddp?|dd|aac|ac3|eac3|dts|truehd|h|x|mpeg)\s*\d{1,4}(?:[ .]\d{1,2})?(?![a-z0-9])",
+    re.I,
+)
+
+# A date stamped into the name, as "21 06 13" or "2021 06 13" or "21.06.13".
+_DATE_STAMP = re.compile(r"\b(\d{2}|\d{4})[ ._-](\d{2})[ ._-](\d{2})\b")
+
+# A placeholder episode "title" that carries no information: "Episode 3.05",
+# "Episode 12", "Ep 5".
+_PLACEHOLDER_TITLE = re.compile(r"^(?:episode|ep|part|pt)\s*\.?\s*[\d.]+$", re.I)
 
 # S01E02 / s1e2 / 1x02 / Season 1 Episode 2 / 102
 _EPISODE_PATTERNS = [
@@ -67,15 +93,44 @@ _LEADING_TRACK = re.compile(r"^\s*[\(\[]?\s*(\d{1,3})\s*[\)\]]?\s*[-._)\]]*\s+")
 _DASHES = "‐‑‒–—―⁃−"
 
 
+# Only these are treated as extensions. os.path.splitext() alone is wrong for
+# dot-separated names: it turns "brian.kennedy.you.raise.me.up" into a stem of
+# "brian.kennedy.you.raise.me" plus an "extension" of ".up", and the last word
+# of the song title is silently lost.
+KNOWN_EXTENSIONS = {
+    # video
+    "mkv", "mp4", "avi", "m4v", "mov", "wmv", "mpg", "mpeg", "m2ts", "ts", "vob",
+    "flv", "webm", "divx", "rmvb", "ogv", "3gp", "iso", "img",
+    # audio
+    "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "wma", "aiff", "ape",
+    "alac", "mid", "midi", "dsf", "mka",
+    # subtitles and metadata
+    "srt", "sub", "idx", "ssa", "ass", "vtt", "nfo", "sfv", "cue", "m3u", "m3u8",
+    # images
+    "jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff", "heic", "svg",
+    # documents and archives
+    "pdf", "epub", "mobi", "azw3", "cbr", "cbz", "txt", "doc", "docx", "rtf",
+    "odt", "xls", "xlsx", "csv", "ppt", "pptx", "zip", "rar", "7z", "tar", "gz",
+    "bz2", "xz", "exe", "msi", "torrent",
+}
+
+
 def split_name(filename):
-    """Split into (stem, ext). ext keeps its dot, or is '' when there is none."""
+    """Split into (stem, ext). ext keeps its dot, or is '' when there is none.
+
+    A trailing piece is only an extension if it actually looks like one.
+    Anything else stays part of the name, so nothing is ever silently dropped.
+    """
     stem, ext = os.path.splitext(filename)
 
     # A leading dot is part of the name, not an extension: ".gitignore"
     if not stem and ext:
         return ext, ""
 
-    return stem, ext
+    if ext and ext[1:].lower() in KNOWN_EXTENSIONS:
+        return stem, ext
+
+    return filename, ""
 
 
 def _collapse(text):
@@ -103,13 +158,24 @@ def _normalise_separators(text):
     return _collapse(text)
 
 
-def strip_junk(text, drop_year=False, drop_brackets=True):
-    """Remove release tags, bracketed noise and separator clutter."""
+def strip_junk(text, drop_year=False, drop_brackets=True, drop_dates=True):
+    """Remove release tags, bracketed noise, date stamps and separator clutter."""
     text = _normalise_separators(text)
 
     if drop_brackets:
         # Bracketed groups in download names are nearly always tags, not title.
         text = re.sub(r"[\(\[\{][^\)\]\}]*[\)\]\}]", " ", text)
+
+    # Phrases first: removing the token "audio" on its own would leave
+    # "with Description" stranded in the middle of a title.
+    for phrase in JUNK_PHRASES:
+        text = re.sub(r"(?<![a-z0-9])" + re.escape(phrase).replace(r"\ ", r"\s+") + r"(?![a-z0-9])",
+                      " ", text, flags=re.I)
+
+    if drop_dates:
+        text = _DATE_STAMP.sub(" ", text)
+
+    text = _CODEC_NOTATION.sub(" ", text)
 
     for token in JUNK_TOKENS:
         text = re.sub(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z0-9])", " ", text, flags=re.I)
@@ -118,6 +184,104 @@ def strip_junk(text, drop_year=False, drop_brackets=True):
         text = _YEAR.sub(" ", text)
 
     return _collapse(text)
+
+
+# ---------------------------------------------------------------------------
+# Capitalisation
+# ---------------------------------------------------------------------------
+
+# Words that keep a fixed spelling whatever the rule says. Seeded with the
+# obvious brand shapes; the user can add their own in the app.
+DEFAULT_WORD_FIXES = {
+    "ftvgirls": "FTVgirls",
+    "bbc": "BBC",
+    "cnn": "CNN",
+    "hbo": "HBO",
+    "us": "US",
+    "uk": "UK",
+    "tv": "TV",
+    "ii": "II",
+    "iii": "III",
+    "iv": "IV",
+}
+
+
+def _fix_word(word, fixes):
+    bare = re.sub(r"[^A-Za-z0-9']", "", word).lower()
+
+    if bare and bare in fixes:
+        return word.replace(re.sub(r"[^A-Za-z0-9']", "", word), fixes[bare])
+
+    return None
+
+
+# Codes that already have a correct shape and must not be re-cased:
+# S01E05, 3x07, 05of10.
+_CODE_SHAPE = re.compile(r"^(?:s\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3}|\d{1,3}of\d{1,3})$", re.I)
+
+
+def title_words(text, fixes=None):
+    """Capitalise every word, which is the rule the client actually asked for.
+
+    Deliberately not smart_title(): that lowercases small words, so "Band of
+    Brothers" would never become "Band Of Brothers".
+    """
+    fixes = dict(DEFAULT_WORD_FIXES, **(fixes or {}))
+    out = []
+
+    for word in text.split(" "):
+        if not word:
+            continue
+
+        fixed = _fix_word(word, fixes)
+
+        if fixed is not None:
+            out.append(fixed)
+            continue
+
+        if _CODE_SHAPE.match(word):
+            out.append(word)
+            continue
+
+        # Capitalise after an opening bracket or dash too: "(live)" -> "(Live)"
+        out.append(re.sub(r"(^|[\(\[\{'-])([a-zA-Z])",
+                          lambda m: m.group(1) + m.group(2).upper(),
+                          word.lower()))
+
+    return " ".join(out)
+
+
+def find_episode_span(text):
+    """Return (before, season, episode, after) or None.
+
+    The text after the code matters: that is where an episode title lives when
+    the filename carries one, as in "... S01E05 Crossroads 1080p ...".
+    """
+    for pattern in _EPISODE_PATTERNS:
+        match = pattern.search(text)
+
+        if match:
+            return (
+                text[: match.start()],
+                int(match.group("season")),
+                int(match.group("episode")),
+                text[match.end():],
+            )
+
+    cleaned = strip_junk(text)
+
+    for match in _BARE_EPISODE.finditer(cleaned):
+        if _YEAR.match(match.group(0)):
+            continue
+
+        return (
+            cleaned[: match.start()],
+            int(match.group("season")),
+            int(match.group("episode")),
+            cleaned[match.end():],
+        )
+
+    return None
 
 
 def find_episode(text):
@@ -184,10 +348,134 @@ def smart_title(text):
 # ---------------------------------------------------------------------------
 
 
-def preset_artist_song(stem):
-    """Best effort at 'Artist - Song'."""
+def lookup_show(text, shows):
+    """Find the entry in the shows table whose 'match' appears in text.
+
+    Longest match wins, so "Le Bureau Des Legendes" beats a stray "Bureau".
+    """
+    if not shows:
+        return None
+
+    haystack = _normalise_separators(text).lower()
+    best = None
+
+    for entry in shows:
+        needle = (entry.get("match") or "").strip().lower()
+
+        if not needle:
+            continue
+
+        needle = _normalise_separators(needle).lower()
+
+        if needle and needle in haystack:
+            if best is None or len(needle) > len(best[0]):
+                best = (needle, entry)
+
+    return best[1] if best else None
+
+
+def episode_code(season, episode, total=None, seasons=None):
+    """The client's two formats.
+
+    "Fewer than 20 episodes -> XofYY; more than 20, or divided into seasons,
+    -> SXEYY." Both halves need the episode count and the season count, which a
+    filename never carries - they come from the shows table or a lookup.
+
+    Season is NOT zero-padded (S3E05), episode is padded to two.
+    """
+    single_season = (seasons is None and (season is None or season <= 1)) or seasons == 1
+
+    if total and total < 20 and single_season:
+        return "{:02d}of{:02d}".format(episode, total)
+
+    return "S{}E{:02d}".format(season if season else 1, episode)
+
+
+def preset_tv(stem, shows=None, fixes=None):
+    """Showname + episode code + episode title, to the client's spec."""
+    found = find_episode_span(stem)
+
+    if not found:
+        return title_words(strip_junk(stem, drop_year=True), fixes)
+
+    before, season, episode, after = found
+
+    entry = lookup_show(stem, shows)
+
+    total = None
+    seasons = None
+    known_title = ""
+
+    if entry and entry.get("name"):
+        show = entry["name"]
+        total = entry.get("episodes")
+        seasons = entry.get("seasons")
+
+        # A titles map, if one was supplied or looked up.
+        titles = entry.get("titles") or {}
+        known_title = titles.get("{}x{}".format(season, episode), "") or ""
+    else:
+        show = title_words(strip_junk(before, drop_year=True), fixes)
+
+    # An episode title, when the filename actually carries one.
+    title = strip_junk(after, drop_year=True)
+    title = re.sub(r"^[\s\-_.]+", "", title)
+
+    if _PLACEHOLDER_TITLE.match(title.strip()):
+        title = ""
+
+    # A looked-up title wins: the filename's version is often truncated or
+    # missing entirely, and this is the whole reason for having the table.
+    #
+    # But a looked-up title can be a placeholder too - plenty of series, French
+    # ones especially, genuinely name every episode "Episode 5". Adding that
+    # back after stripping it from the filename would be absurd, so it goes
+    # through the same filter.
+    if known_title and not _PLACEHOLDER_TITLE.match(known_title.strip()):
+        title = known_title
+
+    code = episode_code(season, episode, total, seasons)
+
+    parts = [show, code]
+
+    if title.strip():
+        parts.append(title_words(title, fixes))
+
+    return _collapse(" ".join(p for p in parts if p))
+
+
+def preset_artist_song(stem, artists=None, fixes=None):
+    """Best effort at 'Artist - Song'.
+
+    A dot-separated name like "brian.kennedy.you.raise.me.up" carries no clue
+    about where the artist ends and the song begins - two words or three is
+    unknowable from the text. So an optional artists table supplies the split
+    point, the same way the shows table supplies a canonical show name.
+    """
     text = strip_junk(stem)
     text = _LEADING_TRACK.sub("", text)
+
+    if artists:
+        lowered = text.lower()
+
+        best = None
+
+        for entry in artists:
+            needle = (entry.get("match") or "").strip().lower()
+
+            if needle and lowered.startswith(needle):
+                if best is None or len(needle) > len(best[0]):
+                    best = (needle, entry)
+
+        if best:
+            needle, entry = best
+            song = text[len(needle):].strip(" -_.")
+            name = entry.get("name") or title_words(needle, fixes)
+
+            if song:
+                return "{} - {}".format(name, title_words(song, fixes))
+
+            return name
 
     parts = [p.strip() for p in re.split(r"\s-\s", text) if p.strip()]
 
@@ -294,8 +582,10 @@ def apply_rules(stem, ext, rules, index=0):
     for rule in rules or []:
         kind = rule.get("type")
 
-        if kind == "preset_artist_song":
-            stem = preset_artist_song(stem)
+        if kind == "preset_tv":
+            stem = preset_tv(stem, rule.get("shows"), rule.get("fixes"))
+        elif kind == "preset_artist_song":
+            stem = preset_artist_song(stem, rule.get("artists"), rule.get("fixes"))
         elif kind == "preset_show_episode":
             stem = preset_show_episode(stem, rule.get("style", "S{season:02d}E{episode:02d}"))
         elif kind == "strip_junk":
@@ -305,6 +595,8 @@ def apply_rules(stem, ext, rules, index=0):
             stem = _rule_find_replace(stem, rule)
         elif kind == "case":
             stem = _rule_case(stem, rule)
+        elif kind == "case_every_word":
+            stem = title_words(stem, rule.get("fixes"))
         elif kind == "insert":
             stem = _rule_insert(stem, rule)
         elif kind == "number":

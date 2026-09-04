@@ -29,6 +29,12 @@
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
        color: var(--dim); margin: 0 0 12px; font-weight: 600; }
   label { display: inline-flex; align-items: center; gap: 6px; }
+  textarea {
+    width: 100%; background: #11131a; color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 7px 9px; font: 13px/1.5 Consolas, "Courier New", monospace;
+    resize: vertical;
+  }
+  code { background: #11131a; padding: 1px 5px; border-radius: 3px; }
   input[type=text], input[type=number], select {
     background: #11131a; color: var(--text); border: 1px solid var(--line);
     border-radius: 5px; padding: 6px 9px; font: inherit; min-width: 0;
@@ -117,6 +123,31 @@
   </section>
 
   <section>
+    <h2>Names the filename cannot tell me</h2>
+    <p class="muted" style="margin-top:-4px">
+      An episode title that is not in the filename, how many episodes a series has, or where an
+      artist's name ends and the song begins — none of that is in the text, so it has to come
+      from here.
+    </p>
+    <div class="row" style="align-items:flex-start">
+      <div style="flex:1 1 340px">
+        <label class="muted" for="showsText">Show names — one per line, <code>found in filename = what you want</code>,
+          optionally <code>| number of episodes</code></label>
+        <textarea id="showsText" rows="5" placeholder="Le Bureau Des Legendes = Bureau&#10;The Americans = A - Americans&#10;Band of Brothers = Band Of Brothers | 10"></textarea>
+      </div>
+      <div style="flex:1 1 340px">
+        <label class="muted" for="artistsText">Artists — one per line, so the tool knows where the artist ends</label>
+        <textarea id="artistsText" rows="5" placeholder="brian kennedy = Brian Kennedy&#10;daft punk = Daft Punk"></textarea>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label><input type="checkbox" id="lookup" /> Look episode titles and counts up online (TVmaze)</label>
+      <span class="muted">Off by default. When off, nothing leaves your PC. Results are cached, so a second run needs no connection.</span>
+    </div>
+    <div id="lookupReport" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section>
     <h2>2 &nbsp;Rules — they run top to bottom, so one pass can do the lot</h2>
     <div class="row" style="margin-bottom:12px">
       <span class="muted">Start from:</span>
@@ -125,10 +156,12 @@
     <div id="rules"></div>
     <div class="row" style="margin-top:10px">
       <select id="addType">
+        <option value="preset_tv">TV: Showname S3E05 Title (your format)</option>
         <option value="preset_artist_song">Music: Artist - Song</option>
-        <option value="preset_show_episode">TV: Showname S01E01</option>
+        <option value="preset_show_episode">TV: Showname S01E01 (plain)</option>
         <option value="strip_junk">Strip download junk</option>
         <option value="find_replace">Find and replace</option>
+        <option value="case_every_word">Capitalise Every Word</option>
         <option value="case">Change capitalisation</option>
         <option value="insert">Add prefix / suffix</option>
         <option value="number">Add numbering</option>
@@ -211,7 +244,9 @@ function note(kind, text) {
 
 // ---------------------------------------------------------------- rules UI
 const FIELDS = {
+  preset_tv: [],
   preset_artist_song: [],
+  case_every_word: [],
   preset_show_episode: [
     { key: "style", type: "select", label: "format",
       options: [["S{season:02d}E{episode:02d}", "S01E01"], ["{season}x{episode:02d}", "1x01"],
@@ -251,7 +286,9 @@ const FIELDS = {
 };
 
 const LABELS = {
-  preset_artist_song: "Music: Artist - Song", preset_show_episode: "TV: Showname S01E01",
+  preset_tv: "TV: Showname S3E05 Title (your format)",
+  case_every_word: "Capitalise Every Word",
+  preset_artist_song: "Music: Artist - Song", preset_show_episode: "TV: Showname S01E01 (plain)",
   strip_junk: "Strip download junk", find_replace: "Find and replace",
   case: "Change capitalisation", insert: "Add prefix / suffix", number: "Add numbering",
   trim: "Remove characters", ext_lower: "Lowercase the extension", set_ext: "Change the extension"
@@ -349,6 +386,39 @@ function renderRules() {
   });
 }
 
+function payload() {
+  return {
+    path: $("path").value.trim(),
+    rules: RULES,
+    recursive: $("recursive").checked,
+    extensions: $("exts").value.split(",").map(s => s.trim()).filter(Boolean),
+    shows_text: $("showsText").value,
+    artists_text: $("artistsText").value,
+    lookup: $("lookup").checked
+  };
+}
+
+function renderLookup(report) {
+  const host = $("lookupReport");
+  if (!host) return;
+  if (!report || !report.length) { host.textContent = ""; return; }
+
+  host.innerHTML = "";
+  report.forEach(r => {
+    const line = document.createElement("div");
+    if (!r.matched) {
+      line.innerHTML = '<span style="color:var(--warn)">no match for "' + r.query + '"</span>';
+    } else {
+      // Show what it matched, so a wrong show is caught before renaming.
+      line.textContent = '"' + r.query + '" matched ' + r.matched +
+        (r.premiered ? " (" + r.premiered + ")" : "") +
+        " — " + r.episodes + " episodes, " + r.seasons + " season" + (r.seasons === 1 ? "" : "s") +
+        (r.used_as && r.used_as !== r.matched ? ", filed as " + r.used_as : "");
+    }
+    host.appendChild(line);
+  });
+}
+
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -375,16 +445,14 @@ async function preview(keepMessage) {
 
   const run = (async () => {
     try {
-      const exts = $("exts").value.split(",").map(s => s.trim()).filter(Boolean);
-      const data = await api("/api/preview", {
-        path: path, rules: RULES, recursive: $("recursive").checked, extensions: exts
-      });
+      const data = await api("/api/preview", Object.assign(payload(), { path: path }));
 
       if (mine !== previewSeq) return;   // a newer preview has overtaken this one
 
       LAST = data;
       if (!keepMessage) note("", "");
       renderPreview();
+      renderLookup(data.lookup);
     } catch (e) {
       if (mine !== previewSeq) return;
       note("err", e.message);
@@ -465,11 +533,7 @@ $("apply").onclick = async () => {
 
   $("apply").disabled = true;
   try {
-    const exts = $("exts").value.split(",").map(s => s.trim()).filter(Boolean);
-    const res = await api("/api/apply", {
-      path: $("path").value.trim(), rules: RULES,
-      recursive: $("recursive").checked, extensions: exts
-    });
+    const res = await api("/api/apply", payload());
     setUndo(res.undo);
     await preview(true);            // refresh first, so the message survives it
     if (res.errors.length) {
@@ -504,6 +568,9 @@ $("refresh").onclick = () => preview();
 $("path").addEventListener("change", () => preview());
 $("recursive").addEventListener("change", () => preview());
 $("exts").addEventListener("change", () => preview());
+$("lookup").addEventListener("change", () => preview());
+$("showsText").addEventListener("change", () => preview());
+$("artistsText").addEventListener("change", () => preview());
 
 $("addRule").onclick = () => {
   const type = $("addType").value;

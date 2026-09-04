@@ -37,6 +37,16 @@ to certain files - type mkv, mp4, mp3 and it will leave everything else alone.
 STEP 2 - build a rule.
 Press one of the starting points:
 
+  TV: Showname S3E05 Title    your format. Turns
+                              "The Americans 2013 S02E01 HDTV XviD-FUM"
+                              into "A - Americans S2E01 Comrades".
+                              Season is not padded, episode is. If a series
+                              has fewer than 20 episodes and one season, it
+                              uses "05of10" instead. An episode name is kept
+                              when the filename has one, and placeholder
+                              names like "Episode 3.05" are dropped.
+
+
   Music: Artist - Song     turns "01 - Radiohead - Karma Police.mp3" and
                            "Radiohead_-_Karma_Police.mp3" into
                            "Radiohead - Karma Police.mp3"
@@ -63,6 +73,57 @@ means it will be renamed, grey means nothing changes, red means there is a
 problem. Nothing on your disk has been touched at this stage.
 
 Then press Rename at the bottom.
+
+
+THINGS THE FILENAME CANNOT TELL ME
+---------------------------------
+
+Some of what you asked for is simply not in the text of the filename, and no
+tool can invent it:
+
+  - An episode name that isn't there. "The Americans 2013 S02E01 HDTV
+    XviD-FUM" contains no trace of the word "Comrades".
+  - How many episodes a series has. "05of10" needs to know there are ten.
+  - Your own shorthand. Nothing in "Le Bureau Des Legendes" says you file it
+    as "Bureau", or that "The Americans" is "A - Americans".
+  - Where an artist's name stops. "brian.kennedy.you.raise.me.up" gives no
+    clue whether the artist is two words or three.
+
+So there are two boxes on the screen for exactly this.
+
+SHOW NAMES - one per line:
+
+    Le Bureau Des Legendes = Bureau
+    The Americans = A - Americans
+    Band of Brothers = Band Of Brothers | 10
+
+The left side is what appears in the filename, the right side is what you
+want. The optional "| 10" is the number of episodes, which switches that
+series to the 05of10 form.
+
+ARTISTS - one per line, so the tool knows where the name ends:
+
+    brian kennedy = Brian Kennedy
+    daft punk = Daft Punk
+
+LOOKING THINGS UP
+-----------------
+
+There is a tick box, off by default: "Look episode titles and counts up
+online". With it on, the program asks TVmaze (a free TV database, no account
+needed) for the episode name, the episode count and the number of seasons.
+That is what makes "Comrades" and "05of10" appear by themselves.
+
+With it off, nothing whatsoever leaves your PC.
+
+Answers are saved, so running the same folder again needs no connection. The
+line under the tick box tells you which series it matched, with the year -
+worth a glance, because two shows can share a name and you would not want
+episode titles from the wrong one.
+
+Your own show names always win. If you have written "The Americans =
+A - Americans", a lookup will not overrule it; it only fills in the facts you
+would otherwise have to type.
 
 
 SAFETY
