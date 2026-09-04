@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bulk Renamer</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2c313b; --text: #e6e8ec;
+    --dim: #99a0ad; --accent: #4c8dff; --ok: #46b17b; --warn: #d9a441; --bad: #e0685f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px; background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--dim); font-size: 12px; }
+  main { padding: 18px 20px 60px; max-width: 1200px; }
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;
+  }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--dim); margin: 0 0 12px; font-weight: 600; }
+  label { display: inline-flex; align-items: center; gap: 6px; }
+  input[type=text], input[type=number], select {
+    background: #11131a; color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 6px 9px; font: inherit; min-width: 0;
+  }
+  input[type=text]:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    background: #262b35; color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 7px 13px; font: inherit; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: #46506a; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.danger { background: #3a2020; border-color: #5c2f2f; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1 1 320px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  .rule {
+    border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+    margin-bottom: 8px; background: #191c23;
+  }
+  .rule-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .rule-head strong { font-size: 13px; }
+  .rule-body { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .chip {
+    background: #232833; border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 12px; cursor: pointer; font-size: 13px;
+  }
+  .chip:hover { border-color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  td.old { color: var(--dim); word-break: break-all; width: 40%; }
+  td.new { word-break: break-all; width: 40%; }
+  tr.unchanged td.new { color: var(--dim); }
+  tr.error td.new { color: var(--bad); }
+  tr.rename td.new { color: var(--ok); }
+  .tablewrap { max-height: 460px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  .pill { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
+  .pill.rename { color: var(--ok); border-color: #2c5a44; }
+  .pill.unchanged { color: var(--dim); }
+  .pill.error { color: var(--bad); border-color: #6a3733; }
+  .summary { display: flex; gap: 16px; margin: 10px 0; flex-wrap: wrap; }
+  .summary b { font-size: 18px; display: block; }
+  .modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none;
+    align-items: center; justify-content: center; z-index: 20; padding: 20px;
+  }
+  .modal.open { display: flex; }
+  .modal-box {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    width: min(720px, 100%); max-height: 80vh; display: flex; flex-direction: column;
+  }
+  .modal-box header { border-radius: 8px 8px 0 0; }
+  .modal-body { overflow: auto; padding: 12px 16px; }
+  .dirlist button { display: block; width: 100%; text-align: left; margin-bottom: 4px; background: #191c23; }
+  .note { border-left: 3px solid var(--warn); padding: 8px 12px; background: #22201a; border-radius: 4px; }
+  .err { border-left: 3px solid var(--bad); padding: 8px 12px; background: #241b1a; border-radius: 4px; }
+  .ok { border-left: 3px solid var(--ok); padding: 8px 12px; background: #182420; border-radius: 4px; }
+  footer.bar {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
+    border-top: 1px solid var(--line); padding: 10px 20px;
+    display: flex; gap: 12px; align-items: center; z-index: 6;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Bulk Renamer</h1>
+  <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
+</header>
+
+<main>
+  <section>
+    <h2>1 &nbsp;Folder</h2>
+    <div class="row">
+      <input type="text" id="path" class="grow" placeholder="C:\Users\you\Downloads" />
+      <button id="browse">Browse…</button>
+      <label><input type="checkbox" id="recursive" /> include sub-folders</label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="muted">only these types
+        <input type="text" id="exts" placeholder="mkv, mp4, mp3  (blank = all)" style="width:250px" />
+      </label>
+    </div>
+  </section>
+
+  <section>
+    <h2>2 &nbsp;Rules — they run top to bottom, so one pass can do the lot</h2>
+    <div class="row" style="margin-bottom:12px">
+      <span class="muted">Start from:</span>
+      <span id="presets"></span>
+    </div>
+    <div id="rules"></div>
+    <div class="row" style="margin-top:10px">
+      <select id="addType">
+        <option value="preset_artist_song">Music: Artist - Song</option>
+        <option value="preset_show_episode">TV: Showname S01E01</option>
+        <option value="strip_junk">Strip download junk</option>
+        <option value="find_replace">Find and replace</option>
+        <option value="case">Change capitalisation</option>
+        <option value="insert">Add prefix / suffix</option>
+        <option value="number">Add numbering</option>
+        <option value="trim">Remove characters</option>
+        <option value="ext_lower">Lowercase the extension</option>
+        <option value="set_ext">Change the extension</option>
+      </select>
+      <button id="addRule">Add rule</button>
+      <span style="flex:1"></span>
+      <select id="rulesetPick"><option value="">— saved rule sets —</option></select>
+      <button id="rulesetLoad">Load</button>
+      <button id="rulesetSave">Save current…</button>
+      <button id="rulesetDelete" class="danger">Delete</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>3 &nbsp;Preview</h2>
+    <div id="msg"></div>
+    <div class="summary" id="summary"></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Now</th><th>After</th><th>Status</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="3" class="muted">Choose a folder to begin.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="bar">
+  <button id="refresh">Refresh preview</button>
+  <button id="apply" class="primary" disabled>Rename</button>
+  <button id="undo" disabled>Undo last batch</button>
+  <span class="muted" id="undoInfo"></span>
+</footer>
+
+<div class="modal" id="picker">
+  <div class="modal-box">
+    <header><h1 style="font-size:15px">Choose a folder</h1><span class="sub" id="pickerPath"></span></header>
+    <div class="modal-body">
+      <div class="row" style="margin-bottom:10px">
+        <button id="pickUp">↑ Up one level</button>
+        <span id="driveList"></span>
+      </div>
+      <div class="dirlist" id="dirs"></div>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:10px">
+      <button class="primary" id="pickUse">Use this folder</button>
+      <button id="pickClose">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = "__TOKEN__";
+let RULES = [];
+let LAST = { rows: [], summary: null };
+let PRESETS = [];
+let RULESETS = {};
+let SEP = "\\";
+let pickerPath = "";
+
+const $ = (id) => document.getElementById(id);
+
+async function api(path, body) {
+  const url = path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
+  const opts = body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+  };
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(() => ({ error: "The app returned something unreadable." }));
+  if (!res.ok) throw new Error(data.error || ("Request failed (" + res.status + ")"));
+  return data;
+}
+
+function note(kind, text) {
+  $("msg").innerHTML = text ? '<div class="' + kind + '" style="margin-bottom:10px"></div>' : "";
+  if (text) $("msg").firstChild.textContent = text;
+}
+
+// ---------------------------------------------------------------- rules UI
+const FIELDS = {
+  preset_artist_song: [],
+  preset_show_episode: [
+    { key: "style", type: "select", label: "format",
+      options: [["S{season:02d}E{episode:02d}", "S01E01"], ["{season}x{episode:02d}", "1x01"],
+                ["Season {season} Episode {episode:02d}", "Season 1 Episode 01"]] }
+  ],
+  strip_junk: [
+    { key: "drop_year", type: "check", label: "also remove the year" },
+    { key: "drop_brackets", type: "check", label: "remove bracketed text", def: true }
+  ],
+  find_replace: [
+    { key: "find", type: "text", label: "find", width: 200 },
+    { key: "replace", type: "text", label: "replace with", width: 200 },
+    { key: "regex", type: "check", label: "regular expression" },
+    { key: "case_sensitive", type: "check", label: "match case" }
+  ],
+  case: [
+    { key: "mode", type: "select", label: "style",
+      options: [["title", "Title Case"], ["lower", "lower case"], ["upper", "UPPER CASE"], ["sentence", "Sentence case"]] }
+  ],
+  insert: [
+    { key: "prefix", type: "text", label: "prefix", width: 160 },
+    { key: "suffix", type: "text", label: "suffix", width: 160 }
+  ],
+  number: [
+    { key: "start", type: "number", label: "start at", def: 1 },
+    { key: "pad", type: "number", label: "digits", def: 2 },
+    { key: "step", type: "number", label: "step", def: 1 },
+    { key: "separator", type: "text", label: "separator", def: " - ", width: 90 },
+    { key: "position", type: "select", label: "where", options: [["prefix", "at the start"], ["suffix", "at the end"]] }
+  ],
+  trim: [
+    { key: "count", type: "number", label: "how many", def: 1 },
+    { key: "side", type: "select", label: "from", options: [["start", "the start"], ["end", "the end"]] }
+  ],
+  ext_lower: [],
+  set_ext: [{ key: "ext", type: "text", label: "new extension", width: 110 }]
+};
+
+const LABELS = {
+  preset_artist_song: "Music: Artist - Song", preset_show_episode: "TV: Showname S01E01",
+  strip_junk: "Strip download junk", find_replace: "Find and replace",
+  case: "Change capitalisation", insert: "Add prefix / suffix", number: "Add numbering",
+  trim: "Remove characters", ext_lower: "Lowercase the extension", set_ext: "Change the extension"
+};
+
+function renderRules() {
+  const host = $("rules");
+  host.innerHTML = "";
+
+  if (!RULES.length) {
+    host.innerHTML = '<div class="muted">No rules yet — pick a starting point above, or add one below.</div>';
+    return;
+  }
+
+  RULES.forEach((rule, i) => {
+    const box = document.createElement("div");
+    box.className = "rule";
+
+    const head = document.createElement("div");
+    head.className = "rule-head";
+    head.innerHTML = '<strong>' + (i + 1) + '. ' + (LABELS[rule.type] || rule.type) + '</strong>';
+
+    const spacer = document.createElement("span");
+    spacer.style.flex = "1";
+    head.appendChild(spacer);
+
+    [["↑", -1], ["↓", 1]].forEach(([txt, dir]) => {
+      const b = document.createElement("button");
+      b.textContent = txt;
+      b.disabled = (dir < 0 && i === 0) || (dir > 0 && i === RULES.length - 1);
+      b.onclick = () => { const t = RULES[i + dir]; RULES[i + dir] = RULES[i]; RULES[i] = t; renderRules(); preview(); };
+      head.appendChild(b);
+    });
+
+    const del = document.createElement("button");
+    del.textContent = "Remove";
+    del.className = "danger";
+    del.onclick = () => { RULES.splice(i, 1); renderRules(); preview(); };
+    head.appendChild(del);
+
+    box.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "rule-body";
+
+    (FIELDS[rule.type] || []).forEach((f) => {
+      const wrap = document.createElement("label");
+      wrap.className = "muted";
+      wrap.appendChild(document.createTextNode(f.label));
+
+      let input;
+      if (f.type === "select") {
+        input = document.createElement("select");
+        f.options.forEach(([val, txt]) => {
+          const o = document.createElement("option");
+          o.value = val; o.textContent = txt;
+          input.appendChild(o);
+        });
+        input.value = rule[f.key] !== undefined ? rule[f.key] : f.options[0][0];
+      } else if (f.type === "check") {
+        input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = rule[f.key] !== undefined ? !!rule[f.key] : !!f.def;
+      } else {
+        input = document.createElement("input");
+        input.type = f.type === "number" ? "number" : "text";
+        input.value = rule[f.key] !== undefined ? rule[f.key] : (f.def !== undefined ? f.def : "");
+        if (f.width) input.style.width = f.width + "px";
+      }
+
+      const commit = () => {
+        rule[f.key] = f.type === "check" ? input.checked
+                    : f.type === "number" ? Number(input.value)
+                    : input.value;
+        preview();
+      };
+      input.addEventListener("change", commit);
+      if (f.type === "text") input.addEventListener("input", debounce(commit, 350));
+
+      if (f.type === "check") wrap.insertBefore(input, wrap.firstChild);
+      else wrap.appendChild(input);
+
+      body.appendChild(wrap);
+    });
+
+    if (!(FIELDS[rule.type] || []).length) {
+      const hint = document.createElement("span");
+      hint.className = "muted";
+      hint.textContent = "nothing to configure";
+      body.appendChild(hint);
+    }
+
+    box.appendChild(body);
+    host.appendChild(box);
+  });
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+// ---------------------------------------------------------------- preview
+let previewSeq = 0;
+let pendingPreview = null;
+
+async function preview(keepMessage) {
+  const path = $("path").value.trim();
+  if (!path) return;
+
+  // Everything below rests on the preview matching what Rename will do, so a
+  // late reply from a superseded request must never paint the table.
+  //
+  // Note what is deliberately NOT done here: the Rename button is not disabled
+  // while a preview runs. Typing in a field fires previews in quick succession,
+  // and a button that blinks disabled swallows the click silently - the user
+  // presses Rename and nothing whatsoever happens. Instead Rename waits for any
+  // preview in flight, and the server recomputes the plan from scratch anyway,
+  // so nothing is ever renamed on the strength of a stale table.
+  const mine = ++previewSeq;
+
+  const run = (async () => {
+    try {
+      const exts = $("exts").value.split(",").map(s => s.trim()).filter(Boolean);
+      const data = await api("/api/preview", {
+        path: path, rules: RULES, recursive: $("recursive").checked, extensions: exts
+      });
+
+      if (mine !== previewSeq) return;   // a newer preview has overtaken this one
+
+      LAST = data;
+      if (!keepMessage) note("", "");
+      renderPreview();
+    } catch (e) {
+      if (mine !== previewSeq) return;
+      note("err", e.message);
+      $("rows").innerHTML = '<tr><td colspan="3" class="muted">—</td></tr>';
+      $("summary").innerHTML = "";
+      $("apply").disabled = true;
+    }
+  })();
+
+  pendingPreview = run;
+  await run;
+
+  if (pendingPreview === run) pendingPreview = null;
+}
+
+function renderPreview() {
+  const { rows, summary } = LAST;
+  const tb = $("rows");
+  tb.innerHTML = "";
+
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="3" class="muted">No files here matching that filter.</td></tr>';
+  }
+
+  rows.slice(0, 2000).forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.className = r.status;
+
+    const a = document.createElement("td"); a.className = "old"; a.textContent = r.old;
+    const b = document.createElement("td"); b.className = "new";
+    b.textContent = r.status === "unchanged" ? "(no change)" : r.new;
+    const c = document.createElement("td");
+    const pill = document.createElement("span");
+    pill.className = "pill " + r.status;
+    pill.textContent = r.status === "rename" ? "will rename" : r.status === "unchanged" ? "unchanged" : "problem";
+    c.appendChild(pill);
+    if (r.reason) {
+      const why = document.createElement("div");
+      why.className = "muted"; why.textContent = r.reason;
+      c.appendChild(why);
+    }
+
+    tr.append(a, b, c);
+    tb.appendChild(tr);
+  });
+
+  if (rows.length > 2000) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="3" class="muted">Showing the first 2000 of ' + rows.length +
+      ' files. Renaming still covers all of them.</td>';
+    tb.appendChild(tr);
+  }
+
+  $("summary").innerHTML =
+    '<div><b>' + summary.rename + '</b><span class="muted">to rename</span></div>' +
+    '<div><b>' + summary.unchanged + '</b><span class="muted">unchanged</span></div>' +
+    '<div><b style="color:var(--bad)">' + summary.error + '</b><span class="muted">problems</span></div>';
+
+  $("apply").disabled = summary.rename === 0;
+  $("apply").textContent = summary.rename ? "Rename " + summary.rename + " file" + (summary.rename === 1 ? "" : "s") : "Rename";
+
+  if (summary.error) {
+    note("note", summary.error + " file(s) have a problem and will be skipped. The rest will still be renamed.");
+  }
+}
+
+// ---------------------------------------------------------------- actions
+$("apply").onclick = async () => {
+  if (pendingPreview) { try { await pendingPreview; } catch (e) {} }
+
+  if (!LAST.summary || !LAST.summary.rename) {
+    note("note", "There is nothing to rename with the current rules.");
+    return;
+  }
+
+  const n = LAST.summary.rename;
+  if (!confirm("Rename " + n + " file" + (n === 1 ? "" : "s") + "?\n\nYou can undo this straight afterwards.")) return;
+
+  $("apply").disabled = true;
+  try {
+    const exts = $("exts").value.split(",").map(s => s.trim()).filter(Boolean);
+    const res = await api("/api/apply", {
+      path: $("path").value.trim(), rules: RULES,
+      recursive: $("recursive").checked, extensions: exts
+    });
+    setUndo(res.undo);
+    await preview(true);            // refresh first, so the message survives it
+    if (res.errors.length) {
+      note("err", res.done + " renamed, but " + res.errors.length + " failed: " +
+        res.errors.slice(0, 3).map(e => e.file + " (" + e.error + ")").join("; "));
+    } else {
+      note("ok", res.done + " file" + (res.done === 1 ? "" : "s") + " renamed. Undo is available below.");
+    }
+  } catch (e) {
+    note("err", e.message);
+  }
+};
+
+$("undo").onclick = async () => {
+  if (!confirm("Put the last batch of names back?")) return;
+  try {
+    const res = await api("/api/undo", {});
+    setUndo(res.undo);
+    await preview(true);
+    note(res.errors.length ? "note" : "ok",
+      res.restored + " file(s) put back." + (res.errors.length ? " " + res.errors.length + " could not be." : ""));
+  } catch (e) { note("err", e.message); }
+};
+
+function setUndo(undo) {
+  $("undo").disabled = !undo || !undo.count;
+  $("undoInfo").textContent = undo && undo.count
+    ? "last batch: " + undo.count + " file(s) at " + undo.when : "";
+}
+
+$("refresh").onclick = () => preview();
+$("path").addEventListener("change", () => preview());
+$("recursive").addEventListener("change", () => preview());
+$("exts").addEventListener("change", () => preview());
+
+$("addRule").onclick = () => {
+  const type = $("addType").value;
+  const rule = { type: type };
+  (FIELDS[type] || []).forEach(f => { if (f.def !== undefined) rule[f.key] = f.def; });
+  RULES.push(rule);
+  renderRules();
+  preview();
+};
+
+// ---------------------------------------------------------------- rulesets
+function renderRulesets() {
+  const sel = $("rulesetPick");
+  sel.innerHTML = '<option value="">— saved rule sets —</option>';
+  Object.keys(RULESETS).sort().forEach(name => {
+    const o = document.createElement("option");
+    o.value = name; o.textContent = name;
+    sel.appendChild(o);
+  });
+}
+
+$("rulesetSave").onclick = async () => {
+  const name = prompt("Name this rule set, so next month is one click:");
+  if (!name) return;
+  try {
+    const res = await api("/api/rulesets/save", { name, rules: RULES });
+    RULESETS = res.rulesets; renderRulesets();
+    $("rulesetPick").value = name;
+    note("ok", 'Saved as "' + name + '".');
+  } catch (e) { note("err", e.message); }
+};
+
+$("rulesetLoad").onclick = () => {
+  const name = $("rulesetPick").value;
+  if (!name || !RULESETS[name]) return;
+  RULES = JSON.parse(JSON.stringify(RULESETS[name]));
+  renderRules(); preview();
+};
+
+$("rulesetDelete").onclick = async () => {
+  const name = $("rulesetPick").value;
+  if (!name || !confirm('Delete the rule set "' + name + '"?')) return;
+  const res = await api("/api/rulesets/delete", { name });
+  RULESETS = res.rulesets; renderRulesets();
+};
+
+// ---------------------------------------------------------------- picker
+async function openPicker(path) {
+  try {
+    const data = await api("/api/browse?path=" + encodeURIComponent(path));
+    pickerPath = data.path;
+    $("pickerPath").textContent = data.path;
+    $("pickUp").disabled = !data.parent;
+    $("pickUp").onclick = () => openPicker(data.parent);
+    const host = $("dirs");
+    host.innerHTML = "";
+    if (!data.dirs.length) host.innerHTML = '<div class="muted">No sub-folders here.</div>';
+    data.dirs.forEach(d => {
+      const b = document.createElement("button");
+      b.textContent = "📁  " + d.name;
+      b.onclick = () => openPicker(d.path);
+      host.appendChild(b);
+    });
+    $("picker").classList.add("open");
+  } catch (e) { note("err", e.message); }
+}
+
+$("browse").onclick = () => openPicker($("path").value.trim() || undefined);
+$("pickClose").onclick = () => $("picker").classList.remove("open");
+$("pickUse").onclick = () => {
+  $("path").value = pickerPath;
+  $("picker").classList.remove("open");
+  preview();
+};
+
+// ---------------------------------------------------------------- start
+(async function start() {
+  try {
+    const data = await api("/api/start");
+    PRESETS = data.presets; RULESETS = data.rulesets; SEP = data.sep;
+    renderRulesets();
+    setUndo(data.undo);
+
+    const host = $("presets");
+    PRESETS.forEach(p => {
+      const b = document.createElement("button");
+      b.className = "chip"; b.textContent = p.label;
+      b.onclick = () => { RULES = JSON.parse(JSON.stringify(p.rules)); renderRules(); preview(); };
+      host.appendChild(b);
+    });
+
+    const drives = $("driveList");
+    data.drives.forEach(d => {
+      const b = document.createElement("button");
+      b.textContent = d.name;
+      b.onclick = () => openPicker(d.path);
+      drives.appendChild(b);
+    });
+
+    $("path").value = data.home;
+    renderRules();
+    preview();
+  } catch (e) {
+    note("err", "Could not start: " + e.message);
+  }
+})();
+</script>
+</body>
+</html>

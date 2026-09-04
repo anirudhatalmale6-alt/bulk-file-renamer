@@ -1,0 +1,120 @@
+BULK RENAMER
+============
+
+A batch file renamer for Windows. Nothing to install.
+
+
+GETTING STARTED
+---------------
+
+1. Unzip the whole BulkRenamer folder somewhere sensible - your Documents
+   folder is fine. Keep the folder together; the parts inside it need
+   each other.
+
+2. Double-click "Rename Files.bat".
+
+3. A black window opens and stays open - that is the program running. Your
+   browser opens with the renamer in it. If the browser does not open by
+   itself, copy the address shown in the black window and paste it into
+   your browser.
+
+4. When you are finished, close the black window.
+
+The program runs entirely on your own PC. Nothing is uploaded anywhere, and
+it does not need an internet connection. It brings its own copy of the
+Python runtime in the "runtime" folder, so you do not have to install
+anything at all.
+
+
+USING IT
+--------
+
+STEP 1 - pick a folder.
+Type or paste the path, or press Browse. Tick "include sub-folders" to work
+through everything underneath as well. The "only these types" box limits it
+to certain files - type mkv, mp4, mp3 and it will leave everything else alone.
+
+STEP 2 - build a rule.
+Press one of the starting points:
+
+  Music: Artist - Song     turns "01 - Radiohead - Karma Police.mp3" and
+                           "Radiohead_-_Karma_Police.mp3" into
+                           "Radiohead - Karma Police.mp3"
+
+  TV: Showname S01E01      turns "The.Bear.S03E07.1080p.WEB-DL.x265.mkv"
+                           into "The Bear S03E07.mkv". It understands
+                           S03E07, 3x07, "Season 3 Episode 7" and bare
+                           codes like 307.
+
+  Film: Title (Year)       turns "Dune.Part.Two.2024.2160p.WEB-DL.mkv"
+                           into "Dune Part Two (2024).mkv"
+
+  Just clean up the junk   strips resolution, codec and release-group tags,
+                           turns dots and underscores back into spaces, and
+                           fixes the capitalisation.
+
+Then add more rules on top if you need them. Rules run top to bottom, each
+one working on the result of the last, and you can reorder them with the
+arrows. That is the point of the whole thing: one pass instead of several.
+
+STEP 3 - check the preview.
+Every file is listed with its current name and the name it would get. Green
+means it will be renamed, grey means nothing changes, red means there is a
+problem. Nothing on your disk has been touched at this stage.
+
+Then press Rename at the bottom.
+
+
+SAFETY
+------
+
+Nothing is renamed until you press Rename and confirm.
+
+Files that would end up with the same name are refused, not overwritten. If
+two files would both become "Radiohead - Karma Police.mp3", both are marked
+red and left alone, and the rest of the batch still goes ahead.
+
+Names Windows will not accept are refused too - illegal characters, reserved
+names like CON or LPT1, names ending in a space or a dot, and names that are
+too long.
+
+Undo puts the last batch back. It survives closing and reopening the
+program, so you can come back to it. It cannot help once you have run a
+second batch on top, so check the result before moving on.
+
+
+SAVING RULES FOR NEXT TIME
+--------------------------
+
+Once a rule set does what you want, press "Save current..." and give it a
+name. Next month, pick it from the dropdown and press Load. That turns a
+recurring ten-minute job into two clicks.
+
+Saved rule sets and the undo record live in the "undo" folder inside
+BulkRenamer. Copying the whole folder to another PC brings them along.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+
+The browser does not open
+  Copy the address from the black window into your browser by hand.
+
+"The bundled runtime folder is missing"
+  The zip was not extracted completely. Extract the whole folder again.
+
+A file says "already exists in this folder"
+  Something with that name is already there. Rename or move it first, or
+  adjust the rule so the new names differ.
+
+A file could not be renamed
+  Usually it is open in another program - a video player holding the file,
+  or the folder open in something that has locked it. Close it and try
+  again. Anything that fails is reported by name and left untouched.
+
+
+WHAT IT DOES NOT DO
+-------------------
+
+It renames files only. It never moves, copies, deletes or edits the contents
+of anything, and it never touches folder names.

@@ -1,0 +1,4 @@
+BulkRenamer/runtime/
+BulkRenamer/undo/
+*.zip
+__pycache__/
