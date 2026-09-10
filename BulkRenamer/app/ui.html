@@ -127,7 +127,7 @@
 <body>
 
 <header>
-  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.7</span></h1>
+  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.8</span></h1>
   <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
 </header>
 
@@ -223,6 +223,7 @@
   <button id="apply" class="primary" disabled>Rename</button>
   <button id="undo" disabled>Undo last batch</button>
   <span class="muted" id="pickNote"></span>
+  <span class="muted" id="busy"></span>
   <span style="flex:1"></span>
   <span class="muted" id="undoInfo"></span>
 </footer>
@@ -700,6 +701,13 @@ async function preview(keepMessage) {
   // so nothing is ever renamed on the strength of a stale table.
   const mine = ++previewSeq;
 
+  // Say something the instant a folder is chosen. Reading a big folder takes a
+  // moment, and looking episode counts up online takes longer still - and with
+  // no word from the app that silence reads as "it did nothing", which is
+  // exactly what it was reported as.
+  $("busy").textContent = "reading " + path +
+    ($("lookup").checked ? " and looking shows up online" : "") + " ...";
+
   const run = (async () => {
     try {
       const data = await api("/api/preview", Object.assign(payload(), { path: path }));
@@ -747,6 +755,10 @@ async function preview(keepMessage) {
       $("rows").innerHTML = '<tr><td colspan="5" class="muted">—</td></tr>';
       $("summary").innerHTML = "";
       $("apply").disabled = true;
+    } finally {
+      // Only the newest preview may clear it: an older one finishing late
+      // would otherwise wipe the line while a newer read is still running.
+      if (mine === previewSeq) $("busy").textContent = "";
     }
   })();
 
@@ -776,7 +788,42 @@ function renderPreview() {
   $("thStyle").style.display = showStyle ? "" : "none";
 
   if (!rows.length) {
-    tb.innerHTML = '<tr><td colspan="' + cols + '" class="muted">No files here matching that filter.</td></tr>';
+    // An empty table used to say "no files here matching that filter", which
+    // was misleading twice over: usually no filter is set, and in a download
+    // folder the files are almost always one level down, inside a folder per
+    // release. Say which of those it is, and offer the fix as a button rather
+    // than expecting anyone to connect it to a checkbox further up the page.
+    const cell = document.createElement("td");
+    cell.colSpan = cols;
+    cell.className = "muted";
+
+    const nested = LAST && LAST.nested;
+    const filtered = $("exts").value.trim();
+
+    if (nested && nested.files) {
+      cell.appendChild(document.createTextNode(
+        "Nothing directly in this folder - but its " + nested.dirs +
+        (nested.dirs === 1 ? " sub-folder holds " : " sub-folders hold ") +
+        nested.files + (nested.files === 1 ? " file" : " files") +
+        (nested.files >= 500 ? " or more" : "") + ". "));
+      const btn = document.createElement("button");
+      btn.textContent = "Show them";
+      btn.onclick = () => { $("recursive").checked = true; preview(); };
+      cell.appendChild(btn);
+    } else if (nested && nested.dirs) {
+      cell.textContent = "This folder holds " + nested.dirs +
+        (nested.dirs === 1 ? " sub-folder" : " sub-folders") + " and no files" +
+        (filtered ? " of those types." : ".");
+    } else if (filtered) {
+      cell.textContent = 'No files here of those types (the "only these types" box says: ' +
+        filtered + ").";
+    } else {
+      cell.textContent = "This folder is empty.";
+    }
+
+    const tr = document.createElement("tr");
+    tr.appendChild(cell);
+    tb.appendChild(tr);
   }
 
   rows.slice(0, 2000).forEach((r) => {
@@ -939,7 +986,7 @@ $("pickAll").addEventListener("change", () => {
 });
 
 $("refresh").onclick = () => preview();
-$("path").addEventListener("change", () => preview());
+$("path").addEventListener("change", () => { preview(); revealPath($("path").value.trim()); });
 $("recursive").addEventListener("change", () => preview());
 $("exts").addEventListener("change", () => preview());
 $("lookup").addEventListener("change", () => preview());
@@ -1061,7 +1108,65 @@ function makeNode(entry, depth) {
   row.append(twist, name);
   wrap.append(row, kids);
 
+  // Handed to revealPath so it can walk down to a folder the app chose itself,
+  // rather than leaving every drive shut and nothing highlighted.
+  wrap.__api = {
+    path: entry.path,
+    kids: kids,
+    expand: expand,
+    highlight: () => {
+      document.querySelectorAll(".tname.selected").forEach(e => e.classList.remove("selected"));
+      name.classList.add("selected");
+
+      // Scroll the tree box, never the page. scrollIntoView() walks every
+      // scrollable ancestor including the document, so it yanks the whole page
+      // up a second or two after load - moving the buttons out from under the
+      // pointer just as someone reaches for them.
+      const box = $("tree");
+      const mine = name.getBoundingClientRect();
+      const host = box.getBoundingClientRect();
+
+      if (mine.top < host.top) box.scrollTop -= host.top - mine.top;
+      else if (mine.bottom > host.bottom) box.scrollTop += mine.bottom - host.bottom;
+    },
+  };
+
   return wrap;
+}
+
+// Open the tree down to a folder and mark it. Called at start-up, because a
+// path sitting in the box while the tree shows four shut drives reads as "it
+// has not chosen anything" - which is how it was reported.
+async function revealPath(target) {
+  if (!target) return;
+
+  const norm = s => String(s).replace(/[\\/]+$/, "").toLowerCase();
+  const want = norm(target);
+  let container = $("tree");
+
+  for (let depth = 0; depth < 24; depth++) {
+    const nodes = Array.from(container.children).map(el => el.__api).filter(Boolean);
+    let best = null;
+
+    for (const api of nodes) {
+      const here = norm(api.path);
+
+      if (want === here) { best = api; break; }
+      if (want.startsWith(here + "\\") || want.startsWith(here + "/")) best = api;
+    }
+
+    if (!best) return;              // that drive is not in the tree - fine
+
+    try {
+      await best.expand();
+    } catch (e) {
+      return;
+    }
+
+    if (norm(best.path) === want) { best.highlight(); return; }
+
+    container = best.kids;
+  }
 }
 
 function buildTree(drives) {
@@ -1108,6 +1213,8 @@ function buildTree(drives) {
     $("path").value = data.home;
     renderRules();
     preview();
+    revealPath(data.home);         // not awaited: the file list must not wait
+                                   // on a folder tree opening behind it
   } catch (e) {
     note("err", "Could not start: " + e.message);
   }

@@ -30,11 +30,18 @@ USING IT
 --------
 
 STEP 1 - pick a folder.
-Use the tree. Click the little arrow to open a folder, click its name to work
-on it - one click, there is no second "use this folder" step. You can still
-type or paste a path in the box instead. Tick "include sub-folders" to work
-through everything underneath as well. The "only these types" box limits it
-to certain files - type mkv, mp4, mp3 and it will leave everything else alone.
+The program opens with your download folder already chosen. It looks on E:
+first, then on your other data drives, for a folder called download or
+downloads, and opens the tree down to it so you can see which one it picked.
+The file list below is filled in already - there is nothing to click to get
+started.
+
+Use the tree to go somewhere else. Click the little arrow to open a folder,
+click its name to work on it - one click, there is no second "use this folder"
+step. You can still type or paste a path in the box instead. Tick "include
+sub-folders" to work through everything underneath as well. The "only these
+types" box limits it to certain files - type mkv, mp4, mp3 and it will leave
+everything else alone.
 
 STEP 2 - the naming style.
 The first button is "Automatic - match the folder", and it is on to start
@@ -186,6 +193,17 @@ It needs at least three files to have anything to compare, it never strips a
 name down to just a number, and it leaves anything in the "never remove these
 words" box alone. The line above the preview always names what it removed.
 
+
+If the list comes back empty, it says why rather than leaving you guessing.
+A download folder usually keeps each release in its own folder, so the top
+level holds folders and no files at all; in that case the program counts what
+is one level down - "Nothing directly in this folder - but its 3 sub-folders
+hold 12 files" - and offers a "Show them" button that ticks "include
+sub-folders" for you.
+
+While a folder is being read, the bar at the bottom says so, and says whether
+it is waiting on the online lookup. A big folder takes a moment and silence
+should not be mistaken for nothing happening.
 
 STEP 3 - check the preview.
 Every file is listed with its current name and the name it would get. Green

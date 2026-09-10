@@ -106,40 +106,118 @@ def is_system_path(path):
     return bool(drive) and drive == SYSTEM_DRIVE
 
 
+def _quiet_windows_disk_errors():
+    """Stop Windows popping "There is no disk in the drive" at us.
+
+    Touching an empty card-reader or DVD letter raises that modal dialog from
+    inside the OS, and this app has no window to put it in front of - so it
+    waits for a click that can never happen and the whole start-up stalls.
+    SEM_FAILCRITICALERRORS turns the dialog into an ordinary error return.
+    """
+    if os.name != "nt":
+        return
+
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+    except Exception:
+        pass
+
+
+def _letters_from_bitmask():
+    """Drive letters straight out of the OS, without touching the drives.
+
+    os.path.exists("A:\\") asks the drive itself, which for empty removable
+    letters means spinning it up and waiting - seconds each, and the app looks
+    dead while it happens. GetLogicalDrives is a bitmask held in memory: it
+    answers instantly and never reaches a disk.
+    """
+    if os.name != "nt":
+        return None
+
+    try:
+        import ctypes
+
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+    except Exception:
+        return None
+
+    if not mask:
+        return None
+
+    return [letter for index, letter in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            if mask & (1 << index)]
+
+
 def drives():
     """Windows drive letters, or / on anything else. System drive flagged."""
     if os.name != "nt":
         return [{"name": "/", "path": "/", "system": False}]
 
+    _quiet_windows_disk_errors()
+
+    letters = _letters_from_bitmask()
+    probe = letters is None          # only fall back to asking the disks
     out = []
 
-    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    for letter in letters if letters is not None else "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
         root = "{}:\\".format(letter)
 
-        if os.path.exists(root):
-            out.append({
-                "name": root,
-                "path": root,
-                "system": "{}:".format(letter).upper() == SYSTEM_DRIVE,
-            })
+        if probe and not os.path.exists(root):
+            continue
+
+        out.append({
+            "name": root,
+            "path": root,
+            "system": "{}:".format(letter).upper() == SYSTEM_DRIVE,
+        })
 
     # Data drives first; the system drive last and clearly marked.
     return sorted(out, key=lambda d: (d["system"], d["name"]))
 
 
+DOWNLOAD_NAMES = ("download", "downloads", "downloaded", "dl")
+
+
 def preferred_start():
     """Where to open the folder box, avoiding the system drive.
 
-    Their words: "im mostly working in E:/download or the other ones."
+    Their words: "im mostly working in E:/download or the other ones.
+    (D upwards)" - so E: is tried first, then every other data drive, and a
+    download folder always beats a bare drive root. Windows compares names
+    case-insensitively, so "Download" and "DOWNLOAD" are found too, but the
+    listing is read rather than guessed: a folder called "Downloads new" would
+    be missed by guessing and is found here.
     """
-    if os.name == "nt":
-        for candidate in ("E:\\download", "E:\\Downloads", "E:\\"):
-            if os.path.isdir(candidate):
-                return candidate
+    if os.name != "nt":
+        return os.path.expanduser("~")
 
-        for entry in drives():
-            if not entry["system"] and os.path.isdir(entry["path"]):
-                return entry["path"]
+    data = [d["path"] for d in drives() if not d["system"]]
+    roots = ["E:\\"] + [d for d in data if d.upper() != "E:\\"]
+
+    for root in roots:
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue                 # empty card reader, unformatted, no rights
+
+        for name in sorted(names):
+            if name.lower() in DOWNLOAD_NAMES:
+                full = os.path.join(root, name)
+
+                try:
+                    if os.path.isdir(full):
+                        return full
+                except OSError:
+                    continue
+
+    for root in roots:
+        try:
+            if os.path.isdir(root):
+                return root
+        except OSError:
+            continue
 
     return os.path.expanduser("~")
 
@@ -208,7 +286,38 @@ def plan_folder(path, rules, recursive=False, extensions=None, report=None):
         report["common"] = common_report
         report["styles"] = style_counts
 
+        if not rows and not recursive:
+            # A download folder usually keeps each release in its own folder,
+            # so the top level holds nothing but folders and the table comes
+            # back empty. Saying "no files" there is true and useless - count
+            # what is one level down so the app can point at the sub-folder
+            # switch instead.
+            report["nested"] = nested_count(path, extensions)
+
     return rows
+
+
+def nested_count(path, extensions=None):
+    """How many sub-folders there are, and how many files they hold between
+    them. Only used to explain an empty table, so it stops early rather than
+    walking a whole drive."""
+    try:
+        dirs = list_dirs(path)
+    except ValueError:
+        return {"dirs": 0, "files": 0}
+
+    total = 0
+
+    for entry in dirs:
+        try:
+            total += len(list_folder(entry["path"], True, extensions))
+        except ValueError:
+            continue
+
+        if total >= 500:             # enough to make the point
+            break
+
+    return {"dirs": len(dirs), "files": total}
 
 
 # ---------------------------------------------------------------------------

@@ -312,7 +312,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"rows": rows, "summary": engine.summarise(rows),
                                  "lookup": report, "auto": auto_id,
                                  "auto_reason": auto_reason, "rules": chosen,
-                                 "common": info.get("common") or {}})
+                                 "common": info.get("common") or {},
+                                 "nested": info.get("nested"),
+                                 "path": data.get("path", "")})
                 return
 
             if parsed.path == "/api/apply":
@@ -398,7 +400,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer v1.7 is running.",
+        "  Bulk Renamer v1.8 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,
