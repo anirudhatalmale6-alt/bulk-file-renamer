@@ -314,6 +314,7 @@ class Handler(BaseHTTPRequestHandler):
                                  "auto_reason": auto_reason, "rules": chosen,
                                  "common": info.get("common") or {},
                                  "nested": info.get("nested"),
+                                 "found": info.get("found"),
                                  "path": data.get("path", "")})
                 return
 
@@ -400,7 +401,7 @@ def main():
     # the address a user needs when the browser fails to open never appears.
     banner = [
         "",
-        "  Bulk Renamer v1.8 is running.",
+        "  Bulk Renamer v1.8.1 is running.",
         "",
         "  If your browser did not open, paste this address into it:",
         "  " + url,

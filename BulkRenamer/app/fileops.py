@@ -32,8 +32,61 @@ def _undo_path():
     return os.path.join(folder, UNDO_FILE)
 
 
-def list_folder(path, recursive=False, extensions=None):
-    """Files in a folder. Directories are never returned - this renames files."""
+LONG_PREFIX = "\\\\?\\"
+
+
+def _wanted_ext(name, extensions):
+    """Does this file pass the "only these types" box? Blank box = everything."""
+    if not extensions:
+        return True
+
+    wanted = {e.strip().lower().lstrip(".") for e in extensions if e.strip()}
+
+    if not wanted:
+        return True
+
+    return os.path.splitext(name)[1].lower().lstrip(".") in wanted
+
+
+def _long(path):
+    """A form of the path that is not subject to the 260-character limit.
+
+    Windows refuses ordinary paths longer than MAX_PATH, and a download folder
+    reaches it easily: one long release name plus a "Subs" folder inside it is
+    enough. os.walk() hands that refusal to its onerror callback, which is
+    None by default - so the folder and everything under it just fails to
+    appear, with nothing said. The \\\\?\\ prefix bypasses the limit entirely.
+    """
+    if os.name != "nt":
+        return path
+
+    if path.startswith(LONG_PREFIX):
+        return path
+
+    if path.startswith("\\\\"):                     # \\server\share
+        return LONG_PREFIX + "UNC\\" + path[2:]
+
+    return LONG_PREFIX + path
+
+
+def _short(path):
+    """Undo _long(), so nothing with \\\\?\\ in it is ever shown to the user."""
+    if path.startswith(LONG_PREFIX + "UNC\\"):
+        return "\\\\" + path[len(LONG_PREFIX) + 4:]
+
+    if path.startswith(LONG_PREFIX):
+        return path[len(LONG_PREFIX):]
+
+    return path
+
+
+def list_folder(path, recursive=False, extensions=None, skipped=None):
+    """Files in a folder. Directories are never returned - this renames files.
+
+    skipped: an optional list, filled in with the folders that could not be
+    read. Anything dropped has to be reported - a preview that quietly misses
+    a sub-folder is worse than one that refuses.
+    """
     path = os.path.abspath(path)
 
     if not os.path.isdir(path):
@@ -47,16 +100,49 @@ def list_folder(path, recursive=False, extensions=None):
     found = []
 
     if recursive:
-        for root, dirs, files in os.walk(path):
+        def failed(exc):
+            if skipped is not None:
+                skipped.append({"path": _short(getattr(exc, "filename", "") or ""),
+                                "why": getattr(exc, "strerror", None) or str(exc)})
+
+        # followlinks=True on purpose. A download folder often reaches another
+        # drive through a junction, and os.walk skips those by default - the
+        # sub-folder is right there in Explorer and simply never appears here.
+        # The cost is that a loop of links would walk for ever, so real paths
+        # are remembered and a second visit ends that branch.
+        seen = set()
+
+        for root, dirs, files in os.walk(_long(path), onerror=failed, followlinks=True):
             dirs[:] = [d for d in dirs if d != UNDO_DIR]
 
+            fresh = []
+
+            for name in dirs:
+                try:
+                    key = os.path.realpath(os.path.join(root, name)).lower()
+                except OSError:
+                    continue
+
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                fresh.append(name)
+
+            dirs[:] = fresh
+
             for name in sorted(files):
-                found.append(os.path.join(root, name))
+                found.append(_short(os.path.join(root, name)))
     else:
-        for name in sorted(os.listdir(path)):
+        try:
+            names = sorted(os.listdir(_long(path)))
+        except OSError as exc:
+            raise ValueError("Cannot read {}: {}".format(path, exc))
+
+        for name in names:
             full = os.path.join(path, name)
 
-            if os.path.isfile(full):
+            if os.path.isfile(_long(full)):
                 found.append(full)
 
     if wanted is not None:
@@ -71,11 +157,11 @@ def list_dirs(path):
     out = []
 
     try:
-        for name in sorted(os.listdir(path)):
+        for name in sorted(os.listdir(_long(path))):
             full = os.path.join(path, name)
 
             try:
-                if os.path.isdir(full):
+                if os.path.isdir(_long(full)):
                     out.append({"name": name, "path": full})
             except OSError:
                 continue
@@ -230,7 +316,13 @@ def plan_folder(path, rules, recursive=False, extensions=None, report=None):
     currently the words every file in a folder shares, so the app can say what
     it removed instead of deleting them silently.
     """
-    files = list_folder(path, recursive, extensions)
+    skipped = []
+
+    # Read without the type filter first, so the count of files hidden by it is
+    # known. "Include sub-folders does not show all my files" is indisguishable
+    # from a forgotten filter unless the app says which it is.
+    everything = list_folder(path, recursive, None, skipped=skipped)
+    files = [f for f in everything if _wanted_ext(f, extensions)]
     root = os.path.abspath(path)
 
     by_dir = {}
@@ -285,6 +377,18 @@ def plan_folder(path, rules, recursive=False, extensions=None, report=None):
     if report is not None:
         report["common"] = common_report
         report["styles"] = style_counts
+
+        # What was read, so "it is missing files" can be checked rather than
+        # argued about: how many files, spread over how many folders, how many
+        # the type filter hid, and every folder that could not be opened.
+        report["found"] = {
+            "files": len(files),
+            "dirs": len({os.path.dirname(f) for f in files}),
+            "hidden": len(everything) - len(files),
+            "recursive": bool(recursive),
+            "skipped": skipped[:20],
+            "skipped_total": len(skipped),
+        }
 
         if not rows and not recursive:
             # A download folder usually keeps each release in its own folder,
@@ -405,7 +509,7 @@ def apply_plan(rows):
         temp_path = os.path.join(row["dir"], ".bulkrenamer-{}.tmp".format(uuid.uuid4().hex[:12]))
 
         try:
-            os.rename(old_path, temp_path)
+            os.rename(_long(old_path), _long(temp_path))
             staged.append((temp_path, row))
         except OSError as exc:
             errors.append({"file": row["old"], "error": str(exc)})
@@ -417,12 +521,12 @@ def apply_plan(rows):
         new_path = row["new_path"]
 
         try:
-            os.rename(temp_path, new_path)
+            os.rename(_long(temp_path), _long(new_path))
             done.append({"from": row["old_path"], "to": new_path})
         except OSError as exc:
             # Put it back rather than leaving a .tmp file behind.
             try:
-                os.rename(temp_path, row["old_path"])
+                os.rename(_long(temp_path), _long(row["old_path"]))
             except OSError:
                 errors.append({
                     "file": row["old"],
@@ -478,13 +582,13 @@ def undo_last():
         directory = os.path.dirname(current)
         temp_path = os.path.join(directory, ".bulkrenamer-{}.tmp".format(uuid.uuid4().hex[:12]))
 
-        if not os.path.exists(current):
+        if not os.path.exists(_long(current)):
             errors.append({"file": os.path.basename(current),
                            "error": "no longer there - it may have been moved or renamed since"})
             continue
 
         try:
-            os.rename(current, temp_path)
+            os.rename(_long(current), _long(temp_path))
             staged.append((temp_path, move))
         except OSError as exc:
             errors.append({"file": os.path.basename(current), "error": str(exc)})
@@ -493,11 +597,11 @@ def undo_last():
 
     for temp_path, move in staged:
         try:
-            os.rename(temp_path, move["from"])
+            os.rename(_long(temp_path), _long(move["from"]))
             restored += 1
         except OSError as exc:
             try:
-                os.rename(temp_path, move["to"])
+                os.rename(_long(temp_path), _long(move["to"]))
             except OSError:
                 pass
 

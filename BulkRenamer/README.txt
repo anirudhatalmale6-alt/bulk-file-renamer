@@ -205,6 +205,17 @@ While a folder is being read, the bar at the bottom says so, and says whether
 it is waiting on the online lookup. A big folder takes a moment and silence
 should not be mistaken for nothing happening.
 
+Under the counts it says what was actually read: "Read 47 files from 9
+folders, this one and everything under it". If the "only these types" box hid
+some, it says how many. And if a folder could not be opened at all - locked by
+Windows, or on a drive that has gone away - it is listed by name, because a
+file quietly missing from a preview is worse than one you were told about.
+
+With "include sub-folders" ticked it goes all the way down, however deep, and
+that includes folders reached through a junction and files whose full path is
+longer than Windows' old 260-character limit. A download folder with long
+release names hits that limit easily.
+
 STEP 3 - check the preview.
 Every file is listed with its current name and the name it would get. Green
 means it will be renamed, grey means nothing changes, red means there is a

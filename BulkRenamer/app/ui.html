@@ -127,7 +127,7 @@
 <body>
 
 <header>
-  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.8</span></h1>
+  <h1>Bulk Renamer <span class="muted" style="font-size:12px;font-weight:400">v1.8.1</span></h1>
   <span class="sub">Nothing is renamed until you press Rename. Every batch can be undone.</span>
 </header>
 
@@ -208,6 +208,7 @@
     <h2>3 &nbsp;Preview</h2>
     <div id="msg"></div>
     <div class="summary" id="summary"></div>
+    <div id="readNote" class="muted" style="margin-bottom:8px"></div>
     <div id="commonNote" class="muted" style="margin-bottom:8px"></div>
     <div class="tablewrap">
       <table>
@@ -754,6 +755,7 @@ async function preview(keepMessage) {
       note("err", e.message);
       $("rows").innerHTML = '<tr><td colspan="5" class="muted">—</td></tr>';
       $("summary").innerHTML = "";
+      $("readNote").textContent = "";
       $("apply").disabled = true;
     } finally {
       // Only the newest preview may clear it: an older one finishing late
@@ -889,10 +891,54 @@ function renderPreview() {
     '<div><b>' + summary.unchanged + '</b><span class="muted">unchanged</span></div>' +
     '<div><b style="color:var(--bad)">' + summary.error + '</b><span class="muted">problems</span></div>';
 
+  renderReadNote(LAST.found);
   refreshPickState();
 
   if (summary.error) {
     note("note", summary.error + " file(s) have a problem and will be skipped. The rest will still be renamed.");
+  }
+}
+
+// Say what was actually read. "Include sub-folders doesn't show all my files"
+// cannot be settled by looking at a table - it needs a count, where the files
+// were, and an honest word about anything that was left out.
+function renderReadNote(found) {
+  const host = $("readNote");
+  host.textContent = "";
+
+  if (!found) return;
+
+  const bits = [];
+
+  bits.push("Read " + found.files + (found.files === 1 ? " file" : " files") +
+    (found.recursive
+      ? " from " + found.dirs + (found.dirs === 1 ? " folder" : " folders") +
+        ", this one and everything under it"
+      : " in this folder only - tick “include sub-folders” for the rest"));
+
+  if (found.hidden) {
+    bits.push(found.hidden + " more " + (found.hidden === 1 ? "file was" : "files were") +
+      " hidden by the “only these types” box");
+  }
+
+  host.textContent = bits.join(". ") + ".";
+
+  if (found.skipped_total) {
+    const warn = document.createElement("div");
+    warn.className = "note";
+    warn.style.margin = "6px 0";
+    warn.textContent = found.skipped_total +
+      (found.skipped_total === 1 ? " folder could not be opened, so its files are NOT listed:"
+                                 : " folders could not be opened, so their files are NOT listed:");
+    const list = document.createElement("div");
+    list.style.marginTop = "4px";
+    (found.skipped || []).forEach(s => {
+      const line = document.createElement("div");
+      line.textContent = s.path + (s.why ? "  (" + s.why + ")" : "");
+      list.appendChild(line);
+    });
+    warn.appendChild(list);
+    host.appendChild(warn);
   }
 }
 
